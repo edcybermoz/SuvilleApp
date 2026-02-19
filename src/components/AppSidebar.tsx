@@ -1,4 +1,4 @@
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard,
   ShoppingCart,
@@ -11,6 +11,7 @@ import {
   LogOut,
   ShoppingBag,
 } from "lucide-react";
+import { useAuth } from "@/contexts/AuthContext";
 
 const menuItems = [
   { icon: LayoutDashboard, label: "Dashboard", path: "/" },
@@ -25,6 +26,13 @@ const menuItems = [
 
 const AppSidebar = () => {
   const location = useLocation();
+  const navigate = useNavigate();
+  const { logout } = useAuth();
+
+  const handleLogout = async () => {
+    await logout();
+    navigate("/login");
+  };
 
   return (
     <aside className="fixed left-0 top-0 z-40 flex h-screen w-60 flex-col bg-sidebar-bg">
@@ -58,7 +66,10 @@ const AppSidebar = () => {
       </nav>
 
       <div className="px-3 pb-6">
-        <button className="flex w-full items-center gap-3 rounded-lg px-4 py-2.5 text-sm font-medium text-sidebar-fg transition-colors hover:bg-sidebar-hover hover:text-primary-foreground">
+        <button
+          onClick={handleLogout}
+          className="flex w-full items-center gap-3 rounded-lg px-4 py-2.5 text-sm font-medium text-sidebar-fg transition-colors hover:bg-sidebar-hover hover:text-primary-foreground"
+        >
           <LogOut className="h-5 w-5" />
           Sair
         </button>
