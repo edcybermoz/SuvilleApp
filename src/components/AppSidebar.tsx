@@ -19,35 +19,42 @@ const menuItems = [
   { icon: Users, label: "Clientes", path: "/clientes" },
   { icon: Package, label: "Produtos", path: "/produtos" },
   { icon: Tags, label: "Categorias", path: "/categorias" },
-  { icon: UserCog, label: "Usuários", path: "/usuarios" },
-  { icon: BarChart3, label: "Relatórios", path: "/relatorios" },
-  { icon: Settings, label: "Configurações", path: "/configuracoes" },
+  { icon: UserCog, label: "Usuários", path: "/usuarios", adminOnly: true },
+  { icon: BarChart3, label: "Relatórios", path: "/relatorios", adminOnly: true },
+  { icon: Settings, label: "Configurações", path: "/configuracoes", adminOnly: true },
 ];
 
 const AppSidebar = () => {
   const location = useLocation();
   const navigate = useNavigate();
-  const { logout } = useAuth();
+  const { logout, isAdmin, userData } = useAuth();
 
   const handleLogout = async () => {
     await logout();
     navigate("/login");
   };
 
+  const filteredMenu = menuItems.filter(item => 
+    !item.adminOnly || (item.adminOnly && isAdmin)
+  );
+
   return (
     <aside className="fixed left-0 top-0 z-40 flex h-screen w-60 flex-col bg-sidebar-bg">
       <div className="flex items-center gap-2 px-6 py-6">
         <ShoppingBag className="h-7 w-7 text-primary" />
-        <span className="text-xl font-bold text-primary-foreground">
-          VILLESys
-        </span>
+        <span className="text-xl font-bold text-primary-foreground">VILLESys</span>
+      </div>
+
+      <div className="px-3 mb-4">
+        <p className="text-xs text-sidebar-fg/60 px-4">Bem-vindo,</p>
+        <p className="text-sm font-medium text-sidebar-fg px-4 truncate">
+          {userData?.nome || "Usuário"}
+        </p>
       </div>
 
       <nav className="flex-1 space-y-1 px-3">
-        {menuItems.map((item) => {
-          const isActive =
-            location.pathname === item.path ||
-            (item.path !== "/" && location.pathname.startsWith(item.path));
+        {filteredMenu.map((item) => {
+          const isActive = location.pathname === item.path;
           return (
             <Link
               key={item.path}

@@ -1,8 +1,12 @@
+// src/components/AppLayout.tsx
 import { Outlet } from "react-router-dom";
 import AppSidebar from "./AppSidebar";
 import AppHeader from "./AppHeader";
-
+import { SyncTest } from "./SyncTest";
+import { useAuth } from "@/contexts/AuthContext";
 const AppLayout = () => {
+  const { userData } = useAuth(); 
+
   return (
     <div className="flex min-h-screen">
       <AppSidebar />
@@ -12,6 +16,7 @@ const AppLayout = () => {
           <Outlet />
         </main>
       </div>
+      {!userData && <SyncTest />} {/*#*/}
     </div>
   );
 };
