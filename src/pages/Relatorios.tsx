@@ -1,11 +1,10 @@
-// src/pages/Relatorios.tsx
 import { useState, useEffect, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { 
-  Printer, 
-  Download, 
+import {
+  Printer,
+  Download,
   Calendar,
   TrendingUp,
   TrendingDown,
@@ -17,34 +16,65 @@ import {
   RefreshCw,
   BarChart3,
   PieChart as PieChartIcon,
-  LineChart as LineChartIcon
+  LineChart as LineChartIcon,
+  Loader2,
+  AreaChart as AreaChartIcon,
+  Lock,
 } from "lucide-react";
-import { 
-  BarChart, 
-  Bar, 
-  XAxis, 
-  YAxis, 
-  CartesianGrid, 
-  Tooltip, 
-  ResponsiveContainer, 
-  PieChart, 
-  Pie, 
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  PieChart,
+  Pie,
   Cell,
   LineChart,
   Line,
-  AreaChart, // CORRIGIDO: importar AreaChart em vez de Area
+  AreaChart,
   Area,
-  Legend
+  Legend,
 } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useToast } from "@/components/ui/use-toast";
-import { listenVendas, listenProdutos, listenClientes, Venda, Produto, Cliente } from "@/lib/store";
+import {
+  listenVendas,
+  listenProdutos,
+  listenClientes,
+  Venda,
+  Produto,
+  Cliente,
+} from "@/lib/store";
 import { useAuth } from "@/contexts/AuthContext";
-import { format, startOfMonth, endOfMonth, eachDayOfInterval } from "date-fns";
+import { usePlanAccess } from "@/hooks/usePlanAccess";
+import {
+  format,
+  startOfMonth,
+  endOfMonth,
+  eachDayOfInterval,
+  startOfWeek,
+  endOfWeek,
+  eachWeekOfInterval,
+  eachMonthOfInterval,
+  startOfDay,
+  endOfDay,
+  differenceInCalendarDays,
+  subDays,
+} from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { Badge } from "@/components/ui/badge";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 
 const COLORS = {
   primary: "hsl(210, 80%, 50%)",
@@ -52,7 +82,13 @@ const COLORS = {
   warning: "hsl(40, 90%, 55%)",
   danger: "hsl(0, 70%, 55%)",
   info: "hsl(280, 60%, 55%)",
-  chart: ["hsl(210, 80%, 50%)", "hsl(160, 55%, 42%)", "hsl(40, 90%, 55%)", "hsl(280, 60%, 55%)", "hsl(0, 70%, 55%)"]
+  chart: [
+    "hsl(210, 80%, 50%)",
+    "hsl(160, 55%, 42%)",
+    "hsl(40, 90%, 55%)",
+    "hsl(280, 60%, 55%)",
+    "hsl(0, 70%, 55%)",
+  ],
 };
 
 interface DateRange {
@@ -60,56 +96,156 @@ interface DateRange {
   to: Date;
 }
 
+type TipoGrafico = "barras" | "linha" | "area";
+type Agrupamento = "dia" | "semana" | "mes";
+
 const Relatorios = () => {
   const { toast } = useToast();
-  const { userData, isAdmin, isVendedor } = useAuth();
-  const [loading, setLoading] = useState(false);
+  const { firebaseUser, isVendedor } = useAuth();
+  const {
+    blocked,
+    canViewReports,
+    canExportData,
+    currentPlan,
+    currentStatus,
+    daysLeft,
+  } = usePlanAccess();
+
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+
   const [vendas, setVendas] = useState<Venda[]>([]);
   const [produtos, setProdutos] = useState<Produto[]>([]);
   const [clientes, setClientes] = useState<Cliente[]>([]);
+
   const [dateRange, setDateRange] = useState<DateRange>({
     from: startOfMonth(new Date()),
-    to: endOfMonth(new Date())
+    to: endOfMonth(new Date()),
   });
-  const [tipoGrafico, setTipoGrafico] = useState<"barras" | "linha" | "area">("barras");
-  const [agrupamento, setAgrupamento] = useState<"dia" | "semana" | "mes">("dia");
+
+  const [tipoGrafico, setTipoGrafico] = useState<TipoGrafico>("barras");
+  const [agrupamento, setAgrupamento] = useState<Agrupamento>("dia");
+
+  const vendedorUid = firebaseUser?.uid ?? null;
 
   useEffect(() => {
-    const unsubVendas = listenVendas(setVendas);
-    const unsubProdutos = listenProdutos(setProdutos);
-    const unsubClientes = listenClientes(setClientes);
+    let carregados = {
+      vendas: false,
+      produtos: false,
+      clientes: false,
+    };
+
+    let erroMostrado = false;
+
+    const verificarFim = () => {
+      if (carregados.vendas && carregados.produtos && carregados.clientes) {
+        setLoading(false);
+      }
+    };
+
+    const tratarErro = (label: keyof typeof carregados) => {
+      carregados[label] = true;
+      verificarFim();
+
+      if (!erroMostrado) {
+        erroMostrado = true;
+        toast({
+          title: "Permissão insuficiente",
+          description:
+            "Não foi possível carregar todos os dados do relatório. Verifique o login Firebase e o documento usuarios/{uid}.",
+          variant: "destructive",
+        });
+      }
+    };
+
+    const unsubVendas = listenVendas(
+      (data) => {
+        setVendas(data);
+        carregados.vendas = true;
+        verificarFim();
+      },
+      () => tratarErro("vendas")
+    );
+
+    const unsubProdutos = listenProdutos(
+      (data) => {
+        setProdutos(data);
+        carregados.produtos = true;
+        verificarFim();
+      },
+      () => tratarErro("produtos")
+    );
+
+    const unsubClientes = listenClientes(
+      (data) => {
+        setClientes(data);
+        carregados.clientes = true;
+        verificarFim();
+      },
+      () => tratarErro("clientes")
+    );
 
     return () => {
       unsubVendas();
       unsubProdutos();
       unsubClientes();
     };
-  }, []);
+  }, [toast]);
+
+  const getVendaDate = (venda: Venda) => {
+    try {
+      return venda.createdAt?.toDate?.() ?? null;
+    } catch {
+      return null;
+    }
+  };
+
+  const formatarMoeda = (valor: number) => {
+    return (
+      Number(valor || 0).toLocaleString("pt-MZ", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      }) + " MZN"
+    );
+  };
 
   const vendasFiltradas = useMemo(() => {
-    let vendasPeriodo = vendas.filter(venda => {
-      if (!venda.createdAt) return false;
-      const dataVenda = venda.createdAt.toDate();
-      return dataVenda >= dateRange.from && dataVenda <= dateRange.to;
+    const inicio = startOfDay(dateRange.from);
+    const fim = endOfDay(dateRange.to);
+
+    let vendasPeriodo = vendas.filter((venda) => {
+      const dataVenda = getVendaDate(venda);
+      return dataVenda && dataVenda >= inicio && dataVenda <= fim;
     });
 
-    if (isVendedor && userData?.id) {
-      vendasPeriodo = vendasPeriodo.filter(v => v.vendedorId === userData.id);
+    if (isVendedor && vendedorUid) {
+      vendasPeriodo = vendasPeriodo.filter((v) => v.vendedorId === vendedorUid);
     }
 
     return vendasPeriodo;
-  }, [vendas, dateRange, isVendedor, userData?.id]);
+  }, [vendas, dateRange, isVendedor, vendedorUid]);
+
+  const vendasConcluidas = useMemo(() => {
+    return vendasFiltradas.filter((v) => v.status === "concluida");
+  }, [vendasFiltradas]);
 
   const stats = useMemo(() => {
-    const vendasConcluidas = vendasFiltradas.filter(v => v.status === "concluida");
-    
     const totalVendas = vendasConcluidas.length;
-    const valorTotal = vendasConcluidas.reduce((acc, v) => acc + v.total, 0);
-    const totalClientes = new Set(vendasConcluidas.map(v => v.clienteId)).size;
+    const valorTotal = vendasConcluidas.reduce((acc, v) => acc + (v.total || 0), 0);
+
+    const clientesUnicos = new Set(
+      vendasConcluidas.map((v) => v.clienteId).filter(Boolean)
+    );
+
+    const totalClientes = clientesUnicos.size;
     const ticketMedio = totalVendas > 0 ? valorTotal / totalVendas : 0;
-    
-    const diasNoPeriodo = Math.ceil((dateRange.to.getTime() - dateRange.from.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+
+    const diasNoPeriodo = differenceInCalendarDays(dateRange.to, dateRange.from) + 1;
     const mediaDiaria = diasNoPeriodo > 0 ? valorTotal / diasNoPeriodo : 0;
+
+    const vendasCanceladas = vendasFiltradas.filter((v) => v.status === "cancelada").length;
+    const taxaCancelamento =
+      vendasFiltradas.length > 0 ? (vendasCanceladas / vendasFiltradas.length) * 100 : 0;
 
     return {
       totalVendas,
@@ -117,129 +253,271 @@ const Relatorios = () => {
       totalClientes,
       ticketMedio,
       mediaDiaria,
-      diasNoPeriodo
+      diasNoPeriodo,
+      vendasCanceladas,
+      taxaCancelamento,
     };
-  }, [vendasFiltradas, dateRange]);
+  }, [vendasConcluidas, vendasFiltradas, dateRange]);
 
   const dadosVendasPorPeriodo = useMemo(() => {
-    const dias = eachDayOfInterval({ start: dateRange.from, end: dateRange.to });
-    
     if (agrupamento === "dia") {
-      return dias.map(dia => {
-        const vendasDoDia = vendasFiltradas.filter(v => {
-          if (!v.createdAt) return false;
-          const dataVenda = v.createdAt.toDate();
-          return format(dataVenda, 'yyyy-MM-dd') === format(dia, 'yyyy-MM-dd');
+      const dias = eachDayOfInterval({
+        start: startOfDay(dateRange.from),
+        end: startOfDay(dateRange.to),
+      });
+
+      return dias.map((dia) => {
+        const vendasDoDia = vendasConcluidas.filter((v) => {
+          const dataVenda = getVendaDate(v);
+          return dataVenda && format(dataVenda, "yyyy-MM-dd") === format(dia, "yyyy-MM-dd");
         });
 
-        const vendasConcluidas = vendasDoDia.filter(v => v.status === "concluida");
-        
         return {
-          data: format(dia, 'dd/MM', { locale: ptBR }),
-          vendas: vendasConcluidas.length,
-          valor: vendasConcluidas.reduce((acc, v) => acc + v.total, 0),
-          diaSemana: format(dia, 'EEE', { locale: ptBR })
+          data: format(dia, "dd/MM", { locale: ptBR }),
+          vendas: vendasDoDia.length,
+          valor: vendasDoDia.reduce((acc, v) => acc + (v.total || 0), 0),
         };
       });
     }
 
-    return [];
-  }, [vendasFiltradas, dateRange, agrupamento]);
+    if (agrupamento === "semana") {
+      const semanas = eachWeekOfInterval(
+        {
+          start: startOfWeek(dateRange.from, { locale: ptBR }),
+          end: endOfWeek(dateRange.to, { locale: ptBR }),
+        },
+        { locale: ptBR }
+      );
+
+      return semanas.map((inicioSemana) => {
+        const fimSemana = endOfWeek(inicioSemana, { locale: ptBR });
+
+        const vendasDaSemana = vendasConcluidas.filter((v) => {
+          const dataVenda = getVendaDate(v);
+          return dataVenda && dataVenda >= inicioSemana && dataVenda <= fimSemana;
+        });
+
+        return {
+          data: `${format(inicioSemana, "dd/MM")} - ${format(fimSemana, "dd/MM")}`,
+          vendas: vendasDaSemana.length,
+          valor: vendasDaSemana.reduce((acc, v) => acc + (v.total || 0), 0),
+        };
+      });
+    }
+
+    const meses = eachMonthOfInterval({
+      start: dateRange.from,
+      end: dateRange.to,
+    });
+
+    return meses.map((mes) => {
+      const nomeMes = format(mes, "MMM/yyyy", { locale: ptBR });
+
+      const vendasDoMes = vendasConcluidas.filter((v) => {
+        const dataVenda = getVendaDate(v);
+        return dataVenda && format(dataVenda, "yyyy-MM") === format(mes, "yyyy-MM");
+      });
+
+      return {
+        data: nomeMes,
+        vendas: vendasDoMes.length,
+        valor: vendasDoMes.reduce((acc, v) => acc + (v.total || 0), 0),
+      };
+    });
+  }, [vendasConcluidas, dateRange, agrupamento]);
 
   const metodosPagamento = useMemo(() => {
     const metodos: { [key: string]: number } = {};
-    
-    vendasFiltradas
-      .filter(v => v.status === "concluida")
-      .forEach(v => {
-        metodos[v.metodoPagamento] = (metodos[v.metodoPagamento] || 0) + v.total;
-      });
+
+    vendasConcluidas.forEach((v) => {
+      metodos[v.metodoPagamento] = (metodos[v.metodoPagamento] || 0) + (v.total || 0);
+    });
 
     const total = Object.values(metodos).reduce((acc, val) => acc + val, 0);
 
-    return Object.entries(metodos).map(([name, value]) => ({
-      name: name === "dinheiro" ? "Dinheiro" : 
-            name === "cartao" ? "Cartão" : 
-            name === "transferencia" ? "Transferência" : name,
-      value: Number((value / total * 100).toFixed(1)),
-      valor: value
-    }));
-  }, [vendasFiltradas]);
+    return Object.entries(metodos)
+      .map(([name, value]) => ({
+        name:
+          name === "dinheiro"
+            ? "Dinheiro"
+            : name === "cartao"
+              ? "Cartão"
+              : name === "transferencia"
+                ? "Transferência"
+                : name,
+        value: total > 0 ? Number(((value / total) * 100).toFixed(1)) : 0,
+        valor: value,
+      }))
+      .sort((a, b) => b.valor - a.valor);
+  }, [vendasConcluidas]);
 
   const produtosMaisVendidos = useMemo(() => {
-    const produtosMap: { [key: string]: { nome: string; quantidade: number; valor: number } } = {};
+    const produtosMap: { [key: string]: { nome: string; quantidade: number; valor: number } } =
+      {};
 
-    vendasFiltradas
-      .filter(v => v.status === "concluida")
-      .forEach(venda => {
-        venda.produtos.forEach(produto => {
-          if (!produtosMap[produto.produtoId]) {
-            produtosMap[produto.produtoId] = {
-              nome: produto.nome,
-              quantidade: 0,
-              valor: 0
-            };
-          }
-          produtosMap[produto.produtoId].quantidade += produto.quantidade;
-          produtosMap[produto.produtoId].valor += produto.subtotal;
-        });
+    vendasConcluidas.forEach((venda) => {
+      venda.produtos.forEach((produto) => {
+        if (!produtosMap[produto.produtoId]) {
+          produtosMap[produto.produtoId] = {
+            nome: produto.nome,
+            quantidade: 0,
+            valor: 0,
+          };
+        }
+
+        produtosMap[produto.produtoId].quantidade += produto.quantidade;
+        produtosMap[produto.produtoId].valor += produto.subtotal || 0;
       });
+    });
 
     return Object.values(produtosMap)
       .sort((a, b) => b.quantidade - a.quantidade)
       .slice(0, 5);
-  }, [vendasFiltradas]);
+  }, [vendasConcluidas]);
 
   const vendasPorDiaSemana = useMemo(() => {
     const dias = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
     const valores = new Array(7).fill(0);
     const contagens = new Array(7).fill(0);
 
-    vendasFiltradas
-      .filter(v => v.status === "concluida")
-      .forEach(v => {
-        if (v.createdAt) {
-          const dia = v.createdAt.toDate().getDay();
-          valores[dia] += v.total;
-          contagens[dia] += 1;
-        }
-      });
+    vendasConcluidas.forEach((v) => {
+      const data = getVendaDate(v);
+      if (!data) return;
+
+      const dia = data.getDay();
+      valores[dia] += v.total || 0;
+      contagens[dia] += 1;
+    });
 
     return dias.map((dia, index) => ({
       dia,
       valor: valores[index],
       vendas: contagens[index],
-      media: contagens[index] > 0 ? valores[index] / contagens[index] : 0
+      media: contagens[index] > 0 ? valores[index] / contagens[index] : 0,
     }));
-  }, [vendasFiltradas]);
+  }, [vendasConcluidas]);
+
+  const analiseResumo = useMemo(() => {
+    const melhorDia = [...vendasPorDiaSemana].sort((a, b) => b.valor - a.valor)[0];
+
+    const metodoPreferido = metodosPagamento[0]?.name || "-";
+    const produtoMaisVendido = produtosMaisVendidos[0]?.nome || "-";
+
+    const periodoAnteriorFim = subDays(startOfDay(dateRange.from), 1);
+    const periodoAnteriorInicio = subDays(periodoAnteriorFim, stats.diasNoPeriodo - 1);
+
+    const vendasPeriodoAnterior = vendas.filter((v) => {
+      const data = getVendaDate(v);
+      if (!data || v.status !== "concluida") return false;
+
+      const vendedorOk = !isVendedor || !vendedorUid || v.vendedorId === vendedorUid;
+      return vendedorOk && data >= periodoAnteriorInicio && data <= endOfDay(periodoAnteriorFim);
+    });
+
+    const valorPeriodoAnterior = vendasPeriodoAnterior.reduce(
+      (acc, v) => acc + (v.total || 0),
+      0
+    );
+
+    const crescimento =
+      valorPeriodoAnterior > 0
+        ? ((stats.valorTotal - valorPeriodoAnterior) / valorPeriodoAnterior) * 100
+        : stats.valorTotal > 0
+          ? 100
+          : 0;
+
+    const taxaConversao =
+      clientes.length > 0 ? (stats.totalClientes / clientes.length) * 100 : 0;
+
+    return {
+      melhorDia: melhorDia?.dia || "-",
+      metodoPreferido,
+      produtoMaisVendido,
+      crescimento,
+      taxaConversao,
+      valorPeriodoAnterior,
+    };
+  }, [
+    vendas,
+    clientes.length,
+    vendasPorDiaSemana,
+    metodosPagamento,
+    produtosMaisVendidos,
+    stats.valorTotal,
+    stats.totalClientes,
+    stats.diasNoPeriodo,
+    dateRange.from,
+    isVendedor,
+    vendedorUid,
+  ]);
 
   const handleExportar = () => {
+    if (!canExportData) {
+      toast({
+        title: "Plano expirado",
+        description: "Renove o plano para exportar relatórios.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const linhas = [
+      ["Indicador", "Valor"],
+      ["Total de Vendas", String(stats.totalVendas)],
+      ["Valor Total", formatarMoeda(stats.valorTotal)],
+      ["Ticket Médio", formatarMoeda(stats.ticketMedio)],
+      ["Média Diária", formatarMoeda(stats.mediaDiaria)],
+      ["Clientes que Compraram", String(stats.totalClientes)],
+      ["Taxa de Cancelamento", `${stats.taxaCancelamento.toFixed(1)}%`],
+      ["Melhor Dia", analiseResumo.melhorDia],
+      ["Produto Mais Vendido", analiseResumo.produtoMaisVendido],
+      ["Método Preferido", analiseResumo.metodoPreferido],
+      ["Crescimento vs período anterior", `${analiseResumo.crescimento.toFixed(1)}%`],
+    ];
+
+    const csv = linhas
+      .map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(";"))
+      .join("\n");
+
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "relatorio-analitico.csv";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
     toast({
-      title: "Exportando...",
-      description: "Seu relatório está sendo gerado."
+      title: "Exportação concluída",
+      description: "O relatório foi exportado com sucesso.",
     });
   };
 
   const handleImprimir = () => {
+    if (!canExportData) {
+      toast({
+        title: "Plano expirado",
+        description: "Renove o plano para imprimir relatórios.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     window.print();
   };
 
   const handleRefresh = () => {
-    setLoading(true);
+    setRefreshing(true);
+
     setTimeout(() => {
-      setLoading(false);
+      setRefreshing(false);
       toast({
         title: "Atualizado",
-        description: "Dados atualizados com sucesso."
+        description: "Dados atualizados com sucesso.",
       });
-    }, 1000);
-  };
-
-  const formatarMoeda = (valor: number) => {
-    return valor.toLocaleString("pt-MZ", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2
-    }) + " MZN";
+    }, 900);
   };
 
   const renderGraficoVendas = () => {
@@ -251,55 +529,53 @@ const Relatorios = () => {
             <XAxis dataKey="data" fontSize={12} />
             <YAxis yAxisId="left" fontSize={12} />
             <YAxis yAxisId="right" orientation="right" fontSize={12} />
-            <Tooltip 
-              formatter={(value: any, name: string) => {
+            <Tooltip
+              formatter={(value: number, name: string) => {
                 if (name === "valor") return [formatarMoeda(value), "Valor"];
                 return [value, "Vendas"];
               }}
             />
             <Legend />
-            <Line 
+            <Line
               yAxisId="left"
-              type="monotone" 
-              dataKey="vendas" 
-              stroke={COLORS.primary} 
+              type="monotone"
+              dataKey="vendas"
+              stroke={COLORS.primary}
               strokeWidth={2}
               dot={{ r: 4 }}
               name="Nº de Vendas"
             />
-            <Line 
+            <Line
               yAxisId="right"
-              type="monotone" 
-              dataKey="valor" 
-              stroke={COLORS.success} 
+              type="monotone"
+              dataKey="valor"
+              stroke={COLORS.success}
               strokeWidth={2}
               dot={{ r: 4 }}
               name="Valor (MZN)"
             />
           </LineChart>
         );
-      
+
       case "area":
         return (
           <AreaChart data={dadosVendasPorPeriodo}>
             <CartesianGrid strokeDasharray="3 3" stroke="hsl(214 25% 90%)" />
             <XAxis dataKey="data" fontSize={12} />
             <YAxis fontSize={12} />
-            <Tooltip 
-              formatter={(value: any) => formatarMoeda(value)}
-            />
+            <Tooltip formatter={(value: number) => formatarMoeda(value)} />
             <Legend />
-            <Area 
-              type="monotone" 
-              dataKey="valor" 
-              stroke={COLORS.primary} 
-              fill={COLORS.primary} 
-              fillOpacity={0.3}
+            <Area
+              type="monotone"
+              dataKey="valor"
+              stroke={COLORS.primary}
+              fill={COLORS.primary}
+              fillOpacity={0.25}
               name="Valor (MZN)"
             />
           </AreaChart>
         );
-      
+
       default:
         return (
           <BarChart data={dadosVendasPorPeriodo}>
@@ -307,24 +583,24 @@ const Relatorios = () => {
             <XAxis dataKey="data" fontSize={12} />
             <YAxis yAxisId="left" fontSize={12} />
             <YAxis yAxisId="right" orientation="right" fontSize={12} />
-            <Tooltip 
-              formatter={(value: any, name: string) => {
+            <Tooltip
+              formatter={(value: number, name: string) => {
                 if (name === "valor") return [formatarMoeda(value), "Valor"];
                 return [value, "Vendas"];
               }}
             />
             <Legend />
-            <Bar 
+            <Bar
               yAxisId="left"
-              dataKey="vendas" 
-              fill={COLORS.primary} 
+              dataKey="vendas"
+              fill={COLORS.primary}
               radius={[4, 4, 0, 0]}
               name="Nº de Vendas"
             />
-            <Bar 
+            <Bar
               yAxisId="right"
-              dataKey="valor" 
-              fill={COLORS.success} 
+              dataKey="valor"
+              fill={COLORS.success}
               radius={[4, 4, 0, 0]}
               name="Valor (MZN)"
             />
@@ -333,36 +609,80 @@ const Relatorios = () => {
     }
   };
 
+  if (loading) {
+    return (
+      <div className="flex h-64 items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (!canViewReports) {
+    return (
+      <div className="space-y-6">
+        <Alert variant="destructive">
+          <Lock className="h-4 w-4" />
+          <AlertDescription className="flex flex-col gap-1">
+            <span className="font-medium">Relatórios bloqueados</span>
+            <span>
+              O plano atual ({currentPlan}) está {currentStatus}.
+              {typeof daysLeft === "number" && currentPlan === "trial"
+                ? ` Dias restantes: ${daysLeft}.`
+                : ""}
+            </span>
+            <span>Renove o plano para voltar a acessar os relatórios.</span>
+          </AlertDescription>
+        </Alert>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      {blocked && (
+        <Alert variant="destructive">
+          <Lock className="h-4 w-4" />
+          <AlertDescription className="flex flex-col gap-1">
+            <span className="font-medium">Modo restrito de relatórios</span>
+            <span>
+              O plano atual ({currentPlan}) está {currentStatus}.
+              {typeof daysLeft === "number" && currentPlan === "trial"
+                ? ` Dias restantes: ${daysLeft}.`
+                : ""}
+            </span>
+            <span>Algumas ações como exportar e imprimir podem estar bloqueadas.</span>
+          </AlertDescription>
+        </Alert>
+      )}
+
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Relatórios Analíticos</h1>
           <p className="text-sm text-muted-foreground">
             Análise detalhada das vendas e desempenho do negócio
           </p>
         </div>
-        <div className="flex gap-3">
-          <Button 
-            variant="outline" 
-            size="sm"
-            onClick={handleRefresh}
-            disabled={loading}
-          >
-            <RefreshCw className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+
+        <div className="flex flex-wrap gap-3">
+          <Button variant="outline" size="sm" onClick={handleRefresh} disabled={refreshing}>
+            <RefreshCw className={`mr-2 h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
             Atualizar
           </Button>
-          <Button size="sm" onClick={handleImprimir}>
-            <Printer className="mr-2 h-4 w-4" /> Imprimir
+
+          <Button size="sm" onClick={handleImprimir} disabled={!canExportData}>
+            <Printer className="mr-2 h-4 w-4" />
+            Imprimir
           </Button>
-          <Button variant="destructive" size="sm" onClick={handleExportar}>
-            <Download className="mr-2 h-4 w-4" /> Exportar
+
+          <Button variant="destructive" size="sm" onClick={handleExportar} disabled={!canExportData}>
+            <Download className="mr-2 h-4 w-4" />
+            Exportar
           </Button>
         </div>
       </div>
 
       {isVendedor && (
-        <div className="mb-4">
+        <div>
           <Badge variant="outline" className="bg-accent/10">
             Mostrando apenas suas vendas
           </Badge>
@@ -371,38 +691,44 @@ const Relatorios = () => {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg flex items-center gap-2">
+          <CardTitle className="flex items-center gap-2 text-lg">
             <Filter className="h-5 w-5" />
             Filtros
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
             <div>
               <Label>Data Inicial</Label>
-              <Input 
-                type="date" 
-                value={format(dateRange.from, 'yyyy-MM-dd')}
-                onChange={(e) => setDateRange(prev => ({ 
-                  ...prev, 
-                  from: new Date(e.target.value) 
-                }))}
+              <Input
+                type="date"
+                value={format(dateRange.from, "yyyy-MM-dd")}
+                onChange={(e) =>
+                  setDateRange((prev) => ({
+                    ...prev,
+                    from: new Date(e.target.value),
+                  }))
+                }
               />
             </div>
+
             <div>
               <Label>Data Final</Label>
-              <Input 
+              <Input
                 type="date"
-                value={format(dateRange.to, 'yyyy-MM-dd')}
-                onChange={(e) => setDateRange(prev => ({ 
-                  ...prev, 
-                  to: new Date(e.target.value) 
-                }))}
+                value={format(dateRange.to, "yyyy-MM-dd")}
+                onChange={(e) =>
+                  setDateRange((prev) => ({
+                    ...prev,
+                    to: new Date(e.target.value),
+                  }))
+                }
               />
             </div>
+
             <div>
               <Label>Agrupar por</Label>
-              <Select value={agrupamento} onValueChange={(v: any) => setAgrupamento(v)}>
+              <Select value={agrupamento} onValueChange={(v: Agrupamento) => setAgrupamento(v)}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -413,10 +739,11 @@ const Relatorios = () => {
                 </SelectContent>
               </Select>
             </div>
+
             <div className="flex items-end">
-              <Button className="w-full">
+              <Button className="w-full" type="button">
                 <Calendar className="mr-2 h-4 w-4" />
-                Aplicar Filtros
+                Filtros Ativos
               </Button>
             </div>
           </div>
@@ -431,9 +758,7 @@ const Relatorios = () => {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{stats.totalVendas}</div>
-            <p className="text-xs text-muted-foreground">
-              No período selecionado
-            </p>
+            <p className="text-xs text-muted-foreground">No período selecionado</p>
           </CardContent>
         </Card>
 
@@ -444,9 +769,7 @@ const Relatorios = () => {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{formatarMoeda(stats.valorTotal)}</div>
-            <p className="text-xs text-muted-foreground">
-              {stats.diasNoPeriodo} dias analisados
-            </p>
+            <p className="text-xs text-muted-foreground">{stats.diasNoPeriodo} dias analisados</p>
           </CardContent>
         </Card>
 
@@ -457,9 +780,7 @@ const Relatorios = () => {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{formatarMoeda(stats.ticketMedio)}</div>
-            <p className="text-xs text-muted-foreground">
-              Por venda
-            </p>
+            <p className="text-xs text-muted-foreground">Por venda</p>
           </CardContent>
         </Card>
 
@@ -470,9 +791,7 @@ const Relatorios = () => {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{formatarMoeda(stats.mediaDiaria)}</div>
-            <p className="text-xs text-muted-foreground">
-              Por dia
-            </p>
+            <p className="text-xs text-muted-foreground">Por dia</p>
           </CardContent>
         </Card>
 
@@ -483,9 +802,7 @@ const Relatorios = () => {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{stats.totalClientes}</div>
-            <p className="text-xs text-muted-foreground">
-              Que compraram
-            </p>
+            <p className="text-xs text-muted-foreground">Que compraram</p>
           </CardContent>
         </Card>
       </div>
@@ -493,19 +810,19 @@ const Relatorios = () => {
       <Tabs defaultValue="vendas" className="space-y-4">
         <TabsList>
           <TabsTrigger value="vendas">
-            <BarChart3 className="h-4 w-4 mr-2" />
+            <BarChart3 className="mr-2 h-4 w-4" />
             Vendas
           </TabsTrigger>
           <TabsTrigger value="produtos">
-            <Package className="h-4 w-4 mr-2" />
+            <Package className="mr-2 h-4 w-4" />
             Produtos
           </TabsTrigger>
           <TabsTrigger value="pagamentos">
-            <PieChartIcon className="h-4 w-4 mr-2" />
+            <PieChartIcon className="mr-2 h-4 w-4" />
             Pagamentos
           </TabsTrigger>
           <TabsTrigger value="analise">
-            <LineChartIcon className="h-4 w-4 mr-2" />
+            <LineChartIcon className="mr-2 h-4 w-4" />
             Análise
           </TabsTrigger>
         </TabsList>
@@ -535,7 +852,7 @@ const Relatorios = () => {
                     size="sm"
                     onClick={() => setTipoGrafico("area")}
                   >
-                    <AreaChart className="h-4 w-4" /> {/* CORRIGIDO: usar AreaChartIcon */}
+                    <AreaChartIcon className="h-4 w-4" />
                   </Button>
                 </div>
               </div>
@@ -557,9 +874,7 @@ const Relatorios = () => {
                   <CartesianGrid strokeDasharray="3 3" stroke="hsl(214 25% 90%)" />
                   <XAxis dataKey="dia" fontSize={12} />
                   <YAxis fontSize={12} />
-                  <Tooltip 
-                    formatter={(value: any) => formatarMoeda(value)}
-                  />
+                  <Tooltip formatter={(value: number) => formatarMoeda(value)} />
                   <Bar dataKey="valor" fill={COLORS.primary} radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
@@ -574,29 +889,40 @@ const Relatorios = () => {
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
-                {produtosMaisVendidos.map((produto, index) => (
-                  <div key={produto.nome} className="space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span className="font-medium">{produto.nome}</span>
-                      <span className="text-muted-foreground">
-                        {produto.quantidade} unidades
-                      </span>
+                {produtosMaisVendidos.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">Nenhum dado disponível no período.</p>
+                ) : (
+                  produtosMaisVendidos.map((produto, index) => (
+                    <div key={produto.nome} className="space-y-2">
+                      <div className="flex justify-between gap-2 text-sm">
+                        <span className="font-medium">{produto.nome}</span>
+                        <span className="text-muted-foreground">
+                          {produto.quantidade} unidades
+                        </span>
+                      </div>
+                      <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+                        <div
+                          className="h-full rounded-full"
+                          style={{
+                            width: `${(produto.quantidade / produtosMaisVendidos[0].quantidade) * 100}%`,
+                            backgroundColor: COLORS.chart[index % COLORS.chart.length],
+                          }}
+                        />
+                      </div>
+                      <div className="flex justify-between text-xs text-muted-foreground">
+                        <span>Valor: {formatarMoeda(produto.valor)}</span>
+                        <span>
+                          {(
+                            (produto.quantidade /
+                              produtosMaisVendidos.reduce((acc, p) => acc + p.quantidade, 0)) *
+                            100
+                          ).toFixed(1)}
+                          %
+                        </span>
+                      </div>
                     </div>
-                    <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
-                      <div 
-                        className="h-full rounded-full"
-                        style={{ 
-                          width: `${(produto.quantidade / produtosMaisVendidos[0].quantidade) * 100}%`,
-                          backgroundColor: COLORS.chart[index % COLORS.chart.length]
-                        }}
-                      />
-                    </div>
-                    <div className="flex justify-between text-xs text-muted-foreground">
-                      <span>Valor: {formatarMoeda(produto.valor)}</span>
-                      <span>{(produto.quantidade / produtosMaisVendidos.reduce((acc, p) => acc + p.quantidade, 0) * 100).toFixed(1)}%</span>
-                    </div>
-                  </div>
-                ))}
+                  ))
+                )}
               </div>
             </CardContent>
           </Card>
@@ -623,9 +949,7 @@ const Relatorios = () => {
                         <Cell key={i} fill={COLORS.chart[i % COLORS.chart.length]} />
                       ))}
                     </Pie>
-                    <Tooltip 
-                      formatter={(value: any) => `${value}%`}
-                    />
+                    <Tooltip formatter={(value: number) => `${value}%`} />
                   </PieChart>
                 </ResponsiveContainer>
               </CardContent>
@@ -637,23 +961,30 @@ const Relatorios = () => {
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
-                  {metodosPagamento.map((metodo, i) => (
-                    <div key={metodo.name} className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
-                      <div className="flex items-center gap-3">
-                        <div 
-                          className="w-3 h-3 rounded-full"
-                          style={{ backgroundColor: COLORS.chart[i % COLORS.chart.length] }}
-                        />
-                        <span className="font-medium">{metodo.name}</span>
+                  {metodosPagamento.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">Nenhum dado disponível no período.</p>
+                  ) : (
+                    metodosPagamento.map((metodo, i) => (
+                      <div
+                        key={metodo.name}
+                        className="flex items-center justify-between rounded-lg bg-muted/30 p-3"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div
+                            className="h-3 w-3 rounded-full"
+                            style={{ backgroundColor: COLORS.chart[i % COLORS.chart.length] }}
+                          />
+                          <span className="font-medium">{metodo.name}</span>
+                        </div>
+                        <div className="text-right">
+                          <p className="font-semibold">{metodo.value}%</p>
+                          <p className="text-xs text-muted-foreground">
+                            {formatarMoeda(metodo.valor || 0)}
+                          </p>
+                        </div>
                       </div>
-                      <div className="text-right">
-                        <p className="font-semibold">{metodo.value}%</p>
-                        <p className="text-xs text-muted-foreground">
-                          {formatarMoeda(metodo.valor || 0)}
-                        </p>
-                      </div>
-                    </div>
-                  ))}
+                    ))
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -669,30 +1000,50 @@ const Relatorios = () => {
               <CardContent>
                 <div className="space-y-4">
                   <div>
-                    <div className="flex justify-between text-sm mb-1">
-                      <span>Taxa de Conversão</span>
-                      <span className="font-semibold">68%</span>
+                    <div className="mb-1 flex justify-between text-sm">
+                      <span>Taxa de Conversão de Clientes</span>
+                      <span className="font-semibold">{analiseResumo.taxaConversao.toFixed(1)}%</span>
                     </div>
                     <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
-                      <div className="h-full rounded-full bg-primary" style={{ width: '68%' }} />
+                      <div
+                        className="h-full rounded-full bg-primary"
+                        style={{ width: `${Math.min(analiseResumo.taxaConversao, 100)}%` }}
+                      />
                     </div>
                   </div>
+
                   <div>
-                    <div className="flex justify-between text-sm mb-1">
-                      <span>Crescimento Mensal</span>
-                      <span className="font-semibold text-accent">+12%</span>
+                    <div className="mb-1 flex justify-between text-sm">
+                      <span>Crescimento vs período anterior</span>
+                      <span
+                        className={`font-semibold ${
+                          analiseResumo.crescimento >= 0 ? "text-accent" : "text-destructive"
+                        }`}
+                      >
+                        {analiseResumo.crescimento >= 0 ? "+" : ""}
+                        {analiseResumo.crescimento.toFixed(1)}%
+                      </span>
                     </div>
                     <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
-                      <div className="h-full rounded-full bg-accent" style={{ width: '12%' }} />
+                      <div
+                        className={`h-full rounded-full ${
+                          analiseResumo.crescimento >= 0 ? "bg-accent" : "bg-destructive"
+                        }`}
+                        style={{ width: `${Math.min(Math.abs(analiseResumo.crescimento), 100)}%` }}
+                      />
                     </div>
                   </div>
+
                   <div>
-                    <div className="flex justify-between text-sm mb-1">
-                      <span>Satisfação do Cliente</span>
-                      <span className="font-semibold">4.5/5</span>
+                    <div className="mb-1 flex justify-between text-sm">
+                      <span>Taxa de Cancelamento</span>
+                      <span className="font-semibold">{stats.taxaCancelamento.toFixed(1)}%</span>
                     </div>
                     <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
-                      <div className="h-full rounded-full bg-warning" style={{ width: '90%' }} />
+                      <div
+                        className="h-full rounded-full bg-warning"
+                        style={{ width: `${Math.min(stats.taxaCancelamento, 100)}%` }}
+                      />
                     </div>
                   </div>
                 </div>
@@ -705,25 +1056,25 @@ const Relatorios = () => {
               </CardHeader>
               <CardContent>
                 <div className="space-y-3">
-                  <div className="flex justify-between py-2 border-b">
+                  <div className="flex justify-between border-b py-2">
                     <span className="text-muted-foreground">Total de vendas:</span>
                     <span className="font-semibold">{stats.totalVendas}</span>
                   </div>
-                  <div className="flex justify-between py-2 border-b">
+                  <div className="flex justify-between border-b py-2">
                     <span className="text-muted-foreground">Valor médio por venda:</span>
                     <span className="font-semibold">{formatarMoeda(stats.ticketMedio)}</span>
                   </div>
-                  <div className="flex justify-between py-2 border-b">
+                  <div className="flex justify-between border-b py-2">
                     <span className="text-muted-foreground">Dia com mais vendas:</span>
-                    <span className="font-semibold">Sexta-feira</span>
+                    <span className="font-semibold">{analiseResumo.melhorDia}</span>
                   </div>
-                  <div className="flex justify-between py-2 border-b">
+                  <div className="flex justify-between border-b py-2">
                     <span className="text-muted-foreground">Produto mais vendido:</span>
-                    <span className="font-semibold">{produtosMaisVendidos[0]?.nome || "-"}</span>
+                    <span className="font-semibold">{analiseResumo.produtoMaisVendido}</span>
                   </div>
                   <div className="flex justify-between py-2">
                     <span className="text-muted-foreground">Método preferido:</span>
-                    <span className="font-semibold">{metodosPagamento[0]?.name || "-"}</span>
+                    <span className="font-semibold">{analiseResumo.metodoPreferido}</span>
                   </div>
                 </div>
               </CardContent>

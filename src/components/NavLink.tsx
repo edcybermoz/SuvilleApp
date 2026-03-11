@@ -1,33 +1,54 @@
 // src/components/NavLink.tsx
-import { NavLink as RouterNavLink, NavLinkProps } from "react-router-dom";
 import { forwardRef } from "react";
+import {
+  NavLink as RouterNavLink,
+  NavLinkProps,
+  NavLinkRenderProps,
+} from "react-router-dom";
 import { cn } from "@/lib/utils";
 
+type ClassNameValue =
+  | string
+  | ((props: NavLinkRenderProps) => string | undefined);
+
 interface NavLinkCompatProps extends Omit<NavLinkProps, "className"> {
-  className?: string;
+  className?: ClassNameValue;
   activeClassName?: string;
   pendingClassName?: string;
+  inactiveClassName?: string;
 }
 
 const NavLink = forwardRef<HTMLAnchorElement, NavLinkCompatProps>(
-  ({ className, activeClassName, pendingClassName, to, children, ...props }, ref) => {
+  (
+    {
+      className,
+      activeClassName,
+      pendingClassName,
+      inactiveClassName,
+      to,
+      children,
+      ...props
+    },
+    ref
+  ) => {
     return (
       <RouterNavLink
         ref={ref}
         to={to}
-        className={({ isActive, isPending }) =>
+        className={(state) =>
           cn(
-            className,
-            isActive && activeClassName,
-            isPending && pendingClassName
+            typeof className === "function" ? className(state) : className,
+            state.isActive && activeClassName,
+            state.isPending && pendingClassName,
+            !state.isActive && !state.isPending && inactiveClassName
           )
         }
         {...props}
       >
-        {children}
+        {typeof children === "function" ? children : children}
       </RouterNavLink>
     );
-  },
+  }
 );
 
 NavLink.displayName = "NavLink";

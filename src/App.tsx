@@ -4,6 +4,8 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "./contexts/AuthContext";
+import { LanguageProvider } from "./contexts/LanguageContext";
+import { SystemConfigProvider } from "./contexts/SystemConfigContext";
 import ProtectedRoute from "./components/ProtectedRoute";
 import AppLayout from "./components/AppLayout";
 import Dashboard from "./pages/Dashboard";
@@ -15,48 +17,145 @@ import Categorias from "./pages/Categorias";
 import Usuarios from "./pages/Usuarios";
 import Relatorios from "./pages/Relatorios";
 import Configuracoes from "./pages/Configuracoes";
+import ControleSistema from "./pages/ControleSistema";
+import Perfil from "./pages/Perfil";
 import Login from "./pages/Login";
 import NotFound from "./pages/NotFound";
-
 
 const queryClient = new QueryClient();
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <AuthProvider>
-      <TooltipProvider>
-        <Toaster />
-        <Sonner />
-        {/* BrowserRouter com future flags para eliminar avisos */}
-        <BrowserRouter
-          future={{
-            v7_startTransition: true,
-            v7_relativeSplatPath: true,
-          }}
-        >
-          <Routes>
-            <Route path="/login" element={<Login />} />
-            <Route
-              element={
-                <ProtectedRoute>
-                  <AppLayout />
-                </ProtectedRoute>
-              }
+      <SystemConfigProvider>
+        <LanguageProvider>
+          <TooltipProvider>
+            <Toaster />
+            <Sonner />
+
+            <BrowserRouter
+              basename="/SuvilleApp"
+              future={{
+                v7_startTransition: true,
+                v7_relativeSplatPath: true,
+              }}
             >
-              <Route path="/" element={<Dashboard />} />
-              <Route path="/vendas" element={<Vendas />} />
-              <Route path="/vendas/nova" element={<NovaVenda />} />
-              <Route path="/clientes" element={<Clientes />} />
-              <Route path="/produtos" element={<Produtos />} />
-              <Route path="/categorias" element={<Categorias />} />
-              <Route path="/usuarios" element={<Usuarios />} />
-              <Route path="/relatorios" element={<Relatorios />} />
-              <Route path="/configuracoes" element={<Configuracoes />} />
-            </Route>
-            <Route path="*" element={<NotFound />} />
-          </Routes>
-        </BrowserRouter>
-      </TooltipProvider>
+              <Routes>
+                <Route path="/login" element={<Login />} />
+
+                <Route
+                  element={
+                    <ProtectedRoute>
+                      <AppLayout />
+                    </ProtectedRoute>
+                  }
+                >
+                  <Route
+                    path="/"
+                    element={
+                      <ProtectedRoute requireSystemAccess>
+                        <Dashboard />
+                      </ProtectedRoute>
+                    }
+                  />
+
+                  <Route
+                    path="/vendas"
+                    element={
+                      <ProtectedRoute requireSystemAccess>
+                        <Vendas />
+                      </ProtectedRoute>
+                    }
+                  />
+
+                  <Route
+                    path="/vendas/nova"
+                    element={
+                      <ProtectedRoute requireSystemAccess>
+                        <NovaVenda />
+                      </ProtectedRoute>
+                    }
+                  />
+
+                  <Route
+                    path="/clientes"
+                    element={
+                      <ProtectedRoute requireSystemAccess>
+                        <Clientes />
+                      </ProtectedRoute>
+                    }
+                  />
+
+                  <Route
+                    path="/produtos"
+                    element={
+                      <ProtectedRoute requireSystemAccess>
+                        <Produtos />
+                      </ProtectedRoute>
+                    }
+                  />
+
+                  <Route
+                    path="/categorias"
+                    element={
+                      <ProtectedRoute requireSystemAccess>
+                        <Categorias />
+                      </ProtectedRoute>
+                    }
+                  />
+
+                  <Route
+                    path="/usuarios"
+                    element={
+                      <ProtectedRoute requireAdmin requireSystemAccess>
+                        <Usuarios />
+                      </ProtectedRoute>
+                    }
+                  />
+
+                  <Route
+                    path="/relatorios"
+                    element={
+                      <ProtectedRoute requireSystemAccess>
+                        <Relatorios />
+                      </ProtectedRoute>
+                    }
+                  />
+
+                  <Route
+                    path="/configuracoes"
+                    element={
+                      <ProtectedRoute requireSystemAccess>
+                        <Configuracoes />
+                      </ProtectedRoute>
+                    }
+                  />
+
+                  <Route
+                    path="/controle-sistema"
+                    element={
+                      <ProtectedRoute requireAdmin>
+                        <ControleSistema />
+                      </ProtectedRoute>
+                    }
+                  />
+
+                  <Route
+                    path="/perfil"
+                    element={
+                      <ProtectedRoute>
+                        <Perfil />
+                      </ProtectedRoute>
+                    }
+                  />
+                </Route>
+
+                <Route path="*" element={<NotFound />} />
+              </Routes>
+            </BrowserRouter>
+          </TooltipProvider>
+        </LanguageProvider>
+      </SystemConfigProvider>
     </AuthProvider>
   </QueryClientProvider>
 );

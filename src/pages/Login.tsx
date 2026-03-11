@@ -1,34 +1,55 @@
-// src/pages/Login.tsx
-import { useState, useEffect } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate, useLocation } from "react-router-dom";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { 
-  ShoppingBag, 
-  Loader2, 
-  Eye, 
+import {
+  ShoppingBag,
+  Loader2,
+  Eye,
   EyeOff,
   Mail,
   Lock,
-  AlertCircle 
+  AlertCircle,
+  KeyRound,
 } from "lucide-react";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 
+const emailValido = (email: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+
+type LocationState = {
+  from?: {
+    pathname?: string;
+  };
+};
+
 const Login = () => {
-  const { login } = useAuth();
+  const { login, loading, profileLoading, isAuthenticated } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
 
-  // Recuperar email salvo (opcional)
+  const from = useMemo(() => {
+    const state = location.state as LocationState | null;
+    return state?.from?.pathname || "/";
+  }, [location.state]);
+
   useEffect(() => {
     const savedEmail = localStorage.getItem("rememberedEmail");
     if (savedEmail) {
@@ -37,70 +58,68 @@ const Login = () => {
     }
   }, []);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError("");
-    setLoading(true);
+  useEffect(() => {
+    if (!loading && !profileLoading && isAuthenticated) {
+      navigate(from, { replace: true });
+    }
+  }, [loading, profileLoading, isAuthenticated, navigate, from]);
 
-    // Validação básica
-    if (!email.includes('@')) {
+  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (submitting) return;
+
+    setError(null);
+
+    const emailLimpo = email.trim();
+
+    if (!emailValido(emailLimpo)) {
       setError("Por favor, insira um email válido.");
-      setLoading(false);
       return;
     }
 
     if (password.length < 6) {
       setError("A senha deve ter pelo menos 6 caracteres.");
-      setLoading(false);
       return;
     }
 
+    setSubmitting(true);
+
     try {
-      await login(email, password);
-      
-      // Salvar email se "lembrar-me" estiver marcado
+      await login(emailLimpo, password, rememberMe);
+
       if (rememberMe) {
-        localStorage.setItem("rememberedEmail", email);
+        localStorage.setItem("rememberedEmail", emailLimpo);
       } else {
         localStorage.removeItem("rememberedEmail");
       }
-      
-      // Redirecionar para a página que o usuário tentou acessar ou para o dashboard
-      const from = (location.state as any)?.from?.pathname || "/";
+
       navigate(from, { replace: true });
-    } catch (error: any) {
-      console.error("Erro no login:", error);
-      
-      // Mensagens de erro amigáveis
-      if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') {
-        setError("Email ou senha incorretos. Verifique suas credenciais.");
-      } else if (error.code === 'auth/too-many-requests') {
-        setError("Muitas tentativas falhas. Tente novamente mais tarde.");
-      } else if (error.code === 'auth/user-disabled') {
-        setError("Esta conta foi desativada. Contacte o administrador.");
-      } else if (error.code === 'auth/invalid-email') {
-        setError("Email inválido. Verifique o formato do email.");
-      } else {
-        setError("Erro ao fazer login. Tente novamente.");
-      }
+    } catch (err: any) {
+      setError(err?.message || "Erro ao fazer login. Tente novamente.");
     } finally {
-      setLoading(false);
+      setSubmitting(false);
     }
   };
 
-  const togglePasswordVisibility = () => {
-    setShowPassword(!showPassword);
+  const handleForgotPassword = () => {
+    setError(
+      "Para recuperar a senha, contacte o suporte ou o administrador do sistema."
+    );
   };
+
+  const isBusy = submitting || loading || profileLoading;
+  const anoAtual = new Date().getFullYear();
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-background to-muted p-4">
       <Card className="w-full max-w-md shadow-xl">
         <CardHeader className="space-y-1 text-center">
-          <div className="flex justify-center mb-2">
+          <div className="mb-2 flex justify-center">
             <div className="rounded-full bg-primary/10 p-3">
               <ShoppingBag className="h-8 w-8 text-primary" />
             </div>
           </div>
+
           <CardTitle className="text-2xl font-bold text-foreground">VILLESys</CardTitle>
           <CardDescription className="text-muted-foreground">
             Sistema de Gestão de Vendas
@@ -108,9 +127,12 @@ const Login = () => {
         </CardHeader>
 
         <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-4" noValidate>
             <div className="space-y-2">
-              <Label htmlFor="email" className="text-foreground">Email</Label>
+              <Label htmlFor="email" className="text-foreground">
+                Email
+              </Label>
+
               <div className="relative">
                 <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
@@ -119,17 +141,21 @@ const Login = () => {
                   placeholder="seu@email.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  required
-                  disabled={loading}
-                  className="pl-9 border-input bg-background text-foreground focus:ring-primary"
+                  disabled={isBusy}
+                  className="border-input bg-background pl-9 text-foreground focus:ring-primary"
                   autoComplete="email"
                   autoFocus
+                  aria-invalid={!!error}
+                  aria-describedby={error ? "login-error" : undefined}
                 />
               </div>
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="password" className="text-foreground">Senha</Label>
+              <Label htmlFor="password" className="text-foreground">
+                Senha
+              </Label>
+
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
@@ -138,61 +164,62 @@ const Login = () => {
                   placeholder="••••••••"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  required
-                  disabled={loading}
-                  className="pl-9 pr-9 border-input bg-background text-foreground focus:ring-primary"
+                  disabled={isBusy}
+                  className="border-input bg-background pl-9 pr-9 text-foreground focus:ring-primary"
                   autoComplete="current-password"
+                  aria-invalid={!!error}
+                  aria-describedby={error ? "login-error" : undefined}
                 />
+
                 <button
                   type="button"
-                  onClick={togglePasswordVisibility}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                  onClick={() => setShowPassword((prev) => !prev)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground transition-colors hover:text-foreground"
+                  aria-label={showPassword ? "Ocultar senha" : "Mostrar senha"}
+                  disabled={isBusy}
                 >
-                  {showPassword ? (
-                    <EyeOff className="h-4 w-4" />
-                  ) : (
-                    <Eye className="h-4 w-4" />
-                  )}
+                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
               </div>
             </div>
 
             <div className="flex items-center justify-between">
-              <label className="flex items-center space-x-2 cursor-pointer">
+              <label className="flex cursor-pointer items-center space-x-2">
                 <input
                   type="checkbox"
                   checked={rememberMe}
                   onChange={(e) => setRememberMe(e.target.checked)}
                   className="h-4 w-4 rounded border-input text-primary focus:ring-primary"
-                  disabled={loading}
+                  disabled={isBusy}
                 />
                 <span className="text-sm text-muted-foreground">Lembrar-me</span>
               </label>
+
               <button
                 type="button"
-                onClick={() => alert("Função de recuperação de senha será implementada")}
-                className="text-sm text-primary hover:text-primary/80 transition-colors"
+                onClick={handleForgotPassword}
+                className="inline-flex items-center gap-1 text-sm text-primary transition-colors hover:text-primary/80"
+                disabled={isBusy}
               >
+                <KeyRound className="h-4 w-4" />
                 Esqueceu a senha?
               </button>
             </div>
 
             {error && (
-              <Alert variant="destructive" className="border-destructive bg-destructive/10">
+              <Alert id="login-error" variant="destructive" className="border-destructive bg-destructive/10">
                 <AlertCircle className="h-4 w-4" />
-                <AlertDescription className="text-destructive">
-                  {error}
-                </AlertDescription>
+                <AlertDescription className="text-destructive">{error}</AlertDescription>
               </Alert>
             )}
 
-            <Button 
-              type="submit" 
-              className="w-full bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
-              disabled={loading}
+            <Button
+              type="submit"
+              className="w-full bg-primary text-primary-foreground hover:bg-primary/90"
+              disabled={isBusy}
               size="lg"
             >
-              {loading ? (
+              {isBusy ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   Entrando...
@@ -205,18 +232,9 @@ const Login = () => {
         </CardContent>
 
         <CardFooter className="flex flex-col space-y-2 border-t border-border pt-4">
-          <p className="text-xs text-center text-muted-foreground">
-            © 2025 VILLESys. Todos os direitos reservados.
+          <p className="text-center text-xs text-muted-foreground">
+            © {anoAtual} VILLESys. Todos os direitos reservados.
           </p>
-          
-{/* Credenciais de teste - apenas em desenvolvimento 
-          {process.env.NODE_ENV === 'development' && (
-            <div className="mt-2 p-3 bg-muted/30 rounded-lg text-xs">
-              <p className="font-medium text-foreground mb-1">🔐 Credenciais de teste:</p>
-              <p className="text-muted-foreground">Admin: admin@villesys.com / admin123</p>
-              <p className="text-muted-foreground">Vendedor: vendedor@villesys.com / vendedor123</p>
-            </div>
-          )*/}
         </CardFooter>
       </Card>
     </div>
