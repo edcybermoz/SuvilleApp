@@ -34,7 +34,6 @@ const App = () => (
             <Sonner />
 
             <BrowserRouter
-              basename="/SuvilleApp"
               future={{
                 v7_startTransition: true,
                 v7_relativeSplatPath: true,
