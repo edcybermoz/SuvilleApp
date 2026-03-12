@@ -37,15 +37,7 @@ type LocationState = {
 };
 
 const Login = () => {
-  const {
-    login,
-    loginWithGoogle,
-    loginWithApple,
-    loading,
-    profileLoading,
-    isAuthenticated,
-  } = useAuth();
-
+  const { login, loading, profileLoading, isAuthenticated } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -56,15 +48,15 @@ const Login = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
 
-  const destino = useMemo(() => {
+  const from = useMemo(() => {
     const state = location.state as LocationState | null;
-    const fromPath = state?.from?.pathname;
+    const pathname = state?.from?.pathname;
 
-    if (!fromPath || fromPath === "/" || fromPath === "/login") {
+    if (!pathname || pathname === "/" || pathname === "/login") {
       return "/dashboard";
     }
 
-    return fromPath;
+    return pathname;
   }, [location.state]);
 
   useEffect(() => {
@@ -77,9 +69,9 @@ const Login = () => {
 
   useEffect(() => {
     if (!loading && !profileLoading && isAuthenticated) {
-      navigate(destino, { replace: true });
+      navigate(from, { replace: true });
     }
-  }, [loading, profileLoading, isAuthenticated, navigate, destino]);
+  }, [loading, profileLoading, isAuthenticated, navigate, from]);
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -110,41 +102,9 @@ const Login = () => {
         localStorage.removeItem("rememberedEmail");
       }
 
-      navigate(destino, { replace: true });
+      navigate(from, { replace: true });
     } catch (err: any) {
       setError(err?.message || "Erro ao fazer login. Tente novamente.");
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const handleGoogleLogin = async () => {
-    if (isBusy) return;
-
-    setError(null);
-    setSubmitting(true);
-
-    try {
-      await loginWithGoogle();
-      navigate(destino, { replace: true });
-    } catch (err: any) {
-      setError(err?.message || "Erro ao entrar com Google.");
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const handleAppleLogin = async () => {
-    if (isBusy) return;
-
-    setError(null);
-    setSubmitting(true);
-
-    try {
-      await loginWithApple();
-      navigate(destino, { replace: true });
-    } catch (err: any) {
-      setError(err?.message || "Erro ao entrar com Apple ID.");
     } finally {
       setSubmitting(false);
     }
@@ -189,24 +149,36 @@ const Login = () => {
               <Button
                 type="button"
                 variant="outline"
-                className="w-full"
-                onClick={handleGoogleLogin}
-                disabled={isBusy}
+                className="w-full justify-between"
+                disabled
               >
-                <Chrome className="mr-2 h-4 w-4" />
-                Entrar com Google
+                <span className="flex items-center">
+                  <Chrome className="mr-2 h-4 w-4" />
+                  Entrar com Google
+                </span>
+                <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
+                  Em desenvolvimento
+                </span>
               </Button>
 
               <Button
                 type="button"
                 variant="outline"
-                className="w-full"
-                onClick={handleAppleLogin}
-                disabled={isBusy}
+                className="w-full justify-between"
+                disabled
               >
-                <Apple className="mr-2 h-4 w-4" />
-                Entrar com Apple ID
+                <span className="flex items-center">
+                  <Apple className="mr-2 h-4 w-4" />
+                  Entrar com Apple ID
+                </span>
+                <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
+                  Em desenvolvimento
+                </span>
               </Button>
+
+              <p className="text-center text-xs text-muted-foreground">
+                Login com Google e Apple ID estará disponível em breve.
+              </p>
 
               <div className="relative py-1">
                 <div className="absolute inset-0 flex items-center">

@@ -35,7 +35,7 @@ const AppSidebar = () => {
 
   const menuItems = useMemo<MenuItem[]>(
     () => [
-      { icon: LayoutDashboard, label: t("menu.dashboard", "Dashboard"), path: "/" },
+      { icon: LayoutDashboard, label: t("menu.dashboard", "Dashboard"), path: "/dashboard" },
       { icon: ShoppingCart, label: t("menu.vendas", "Vendas"), path: "/vendas" },
       { icon: Users, label: t("menu.clientes", "Clientes"), path: "/clientes" },
       { icon: Package, label: t("menu.produtos", "Produtos"), path: "/produtos" },
@@ -68,10 +68,6 @@ const AppSidebar = () => {
   );
 
   const isActiveRoute = (path: string) => {
-    if (path === "/") {
-      return location.pathname === "/";
-    }
-
     return location.pathname === path || location.pathname.startsWith(`${path}/`);
   };
 
