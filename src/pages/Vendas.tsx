@@ -29,6 +29,7 @@ import {
 import { Timestamp } from "firebase/firestore";
 import { useAuth } from "@/contexts/AuthContext";
 import { usePlanAccess } from "@/hooks/usePlanAccess";
+import { useSystemConfig } from "@/contexts/SystemConfigContext";
 import {
   Dialog,
   DialogContent,
@@ -69,6 +70,7 @@ const ITEMS_PER_PAGE = 8;
 const Vendas = () => {
   const { firebaseUser, isAdmin, isVendedor } = useAuth();
   const { blocked, canCreateSales, currentPlan, currentStatus, daysLeft } = usePlanAccess();
+  const { empresaConfig, sistemaConfig, ivaConfig } = useSystemConfig();
   const { toast } = useToast();
 
   const [vendas, setVendas] = useState<Venda[]>([]);
@@ -175,11 +177,27 @@ const Vendas = () => {
     }
   };
 
-  const formatarMoeda = (valor: number) =>
-    Number(valor || 0).toLocaleString("pt-MZ", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }) + " MZN";
+  const formatarDataCurta = (timestamp?: Timestamp | null) => {
+    if (!timestamp) return "Data não disponível";
+
+    try {
+      const date = timestamp.toDate();
+      return format(date, "dd/MM/yyyy", { locale: ptBR });
+    } catch {
+      return "Data inválida";
+    }
+  };
+
+  const formatarMoeda = (valor: number) => {
+    const moeda = sistemaConfig?.moeda || "MZN";
+
+    return (
+      Number(valor || 0).toLocaleString("pt-MZ", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      }) + ` ${moeda}`
+    );
+  };
 
   const getTimestampMs = (timestamp?: Timestamp | null) => {
     try {
@@ -188,6 +206,19 @@ const Vendas = () => {
       return 0;
     }
   };
+
+  const dadosEmpresa = {
+    nome: empresaConfig?.nome || "VILLESys",
+    subtitulo: "Sistema de Gestão de Vendas",
+    nuit: empresaConfig?.nuit ? `NUIT: ${empresaConfig.nuit}` : "NUIT não configurado",
+    endereco: empresaConfig?.endereco || "Endereço não configurado",
+    telefone: empresaConfig?.telefone || "Telefone não configurado",
+    email: empresaConfig?.email || "Email não configurado",
+    website: empresaConfig?.website || "",
+    logo: empresaConfig?.logo || "",
+  };
+
+  const taxaIvaAtual = ivaConfig?.taxaPadrao ?? 16;
 
   const stats = useMemo(() => {
     const concluidas = vendas.filter((v) => v.status === "concluida");
@@ -321,7 +352,9 @@ const Vendas = () => {
     const config = statusConfig[status as keyof typeof statusConfig] || statusConfig.pendente;
 
     return (
-      <span className={`flex w-fit items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-semibold ${config.class}`}>
+      <span
+        className={`flex w-fit items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-semibold ${config.class}`}
+      >
         <span>{config.icon}</span>
         {config.label}
       </span>
@@ -332,6 +365,11 @@ const Vendas = () => {
     if (metodo === "dinheiro") return "Dinheiro";
     if (metodo === "cartao") return "Cartão";
     return "Transferência";
+  };
+
+  const getNumeroFactura = (venda: Venda) => {
+    const baseId = venda.id ? venda.id.slice(0, 8).toUpperCase() : "SEM-ID";
+    return `FT-${baseId}`;
   };
 
   const handleSort = (field: SortField) => {
@@ -419,19 +457,345 @@ const Vendas = () => {
     }
   };
 
+  const escapeHtml = (value?: string | number | null) =>
+  String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+
+  const gerarHtmlFactura = (venda: Venda) => {
+    const logoHtml = dadosEmpresa.logo
+      ? `<img src="${dadosEmpresa.logo}" alt="${escapeHtml(
+          dadosEmpresa.nome
+        )}" style="width:56px;height:56px;border-radius:10px;object-fit:cover;border:1px solid #ddd;" />`
+      : "";
+
+    const linhasProdutos = venda.produtos
+      .map(
+        (produto) => `
+          <tr>
+            <td style="padding:10px 12px;border-top:1px solid #e5e7eb;">${escapeHtml(produto.nome)}</td>
+            <td style="padding:10px 12px;border-top:1px solid #e5e7eb;text-align:right;">${escapeHtml(produto.quantidade)}</td>
+            <td style="padding:10px 12px;border-top:1px solid #e5e7eb;text-align:right;">${escapeHtml(formatarMoeda(produto.precoUnitario))}</td>
+            <td style="padding:10px 12px;border-top:1px solid #e5e7eb;text-align:right;font-weight:600;">${escapeHtml(formatarMoeda(produto.subtotal))}</td>
+          </tr>
+        `
+      )
+      .join("");
+
+    return `
+      <!doctype html>
+      <html lang="pt">
+        <head>
+          <meta charset="UTF-8" />
+          <title>Factura ${escapeHtml(getNumeroFactura(venda))}</title>
+          <style>
+            @page {
+              size: A4;
+              margin: 12mm;
+            }
+
+            * { box-sizing: border-box; }
+
+            body {
+              margin: 0;
+              font-family: Arial, Helvetica, sans-serif;
+              color: #111827;
+              background: #ffffff;
+            }
+
+            .page {
+              width: 100%;
+              padding: 8px;
+            }
+
+            .card {
+              border: 1px solid #e5e7eb;
+              border-radius: 14px;
+              padding: 24px;
+            }
+
+            .row {
+              display: flex;
+              justify-content: space-between;
+              gap: 24px;
+            }
+
+            .col {
+              flex: 1;
+              min-width: 0;
+            }
+
+            .muted { color: #6b7280; }
+            .small { font-size: 12px; }
+            .text-sm { font-size: 14px; }
+            .text-xl { font-size: 24px; }
+            .bold { font-weight: 700; }
+            .semi { font-weight: 600; }
+
+            .box {
+              border: 1px solid #e5e7eb;
+              border-radius: 10px;
+              padding: 14px;
+              background: #fff;
+            }
+
+            .box-soft {
+              border: 1px solid #e5e7eb;
+              border-radius: 10px;
+              padding: 14px;
+              background: #f8fafc;
+            }
+
+            .divider {
+              border-top: 1px solid #e5e7eb;
+              margin: 24px 0;
+            }
+
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              font-size: 14px;
+            }
+
+            thead th {
+              background: #f3f4f6;
+              text-align: left;
+              padding: 12px;
+              font-weight: 700;
+            }
+
+            .text-right { text-align: right; }
+
+            .totals {
+              width: 100%;
+              max-width: 380px;
+              margin-left: auto;
+            }
+
+            .total-line {
+              display: flex;
+              justify-content: space-between;
+              gap: 16px;
+              padding: 6px 0;
+              font-size: 14px;
+            }
+
+            .grand-total {
+              display: flex;
+              justify-content: space-between;
+              gap: 16px;
+              padding-top: 12px;
+              margin-top: 8px;
+              border-top: 1px solid #e5e7eb;
+              font-size: 20px;
+              font-weight: 700;
+            }
+
+            .footer {
+              margin-top: 24px;
+              padding-top: 16px;
+              border-top: 1px solid #e5e7eb;
+              text-align: center;
+              font-size: 12px;
+              color: #6b7280;
+            }
+
+            .logo-line {
+              display: flex;
+              align-items: flex-start;
+              gap: 14px;
+            }
+
+            .cancel-box {
+              margin-top: 20px;
+              border: 1px solid #fecaca;
+              background: #fef2f2;
+              color: #991b1b;
+              border-radius: 10px;
+              padding: 14px;
+              font-size: 14px;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="page">
+            <div class="card">
+              <div class="row">
+                <div class="col">
+                  <div class="logo-line">
+                    ${logoHtml}
+                    <div>
+                      <div class="text-xl bold">${escapeHtml(dadosEmpresa.nome)}</div>
+                      <div class="text-sm muted">${escapeHtml(dadosEmpresa.subtitulo)}</div>
+                    </div>
+                  </div>
+
+                  <div style="margin-top:14px;" class="text-sm">
+                    <div>${escapeHtml(dadosEmpresa.nuit)}</div>
+                    <div>${escapeHtml(dadosEmpresa.endereco)}</div>
+                    <div>${escapeHtml(dadosEmpresa.telefone)}</div>
+                    <div>${escapeHtml(dadosEmpresa.email)}</div>
+                    ${
+                      dadosEmpresa.website
+                        ? `<div>${escapeHtml(dadosEmpresa.website)}</div>`
+                        : ""
+                    }
+                  </div>
+                </div>
+
+                <div class="box-soft" style="width:280px;">
+                  <div class="small semi muted" style="text-transform:uppercase;letter-spacing:.08em;">Factura</div>
+                  <div class="text-sm" style="margin-top:10px;">
+                    <div><span class="semi">Número:</span> ${escapeHtml(getNumeroFactura(venda))}</div>
+                    <div><span class="semi">ID Venda:</span> ${escapeHtml(venda.id)}</div>
+                    <div><span class="semi">Data:</span> ${escapeHtml(formatarData(venda.createdAt))}</div>
+                    <div><span class="semi">Status:</span> ${escapeHtml(
+                      venda.status === "concluida"
+                        ? "Concluída"
+                        : venda.status === "cancelada"
+                          ? "Cancelada"
+                          : "Pendente"
+                    )}</div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="divider"></div>
+
+              <div class="row">
+                <div class="box col">
+                  <div class="small semi muted" style="text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;">Cliente</div>
+                  <div class="text-sm">
+                    <div class="semi">${escapeHtml(venda.clienteNome || "Consumidor final")}</div>
+                    <div><span class="muted">Código da venda:</span> ${escapeHtml(venda.id || "-")}</div>
+                    <div><span class="muted">Data da venda:</span> ${escapeHtml(formatarDataCurta(venda.createdAt))}</div>
+                  </div>
+                </div>
+
+                <div class="box col">
+                  <div class="small semi muted" style="text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;">Pagamento</div>
+                  <div class="text-sm">
+                    <div><span class="semi">Método:</span> ${escapeHtml(getMetodoPagamentoLabel(venda.metodoPagamento))}</div>
+                    <div><span class="semi">Itens:</span> ${escapeHtml(venda.produtos.length)}</div>
+                    ${
+                      venda.vendedorNome
+                        ? `<div><span class="semi">Vendedor:</span> ${escapeHtml(venda.vendedorNome)}</div>`
+                        : ""
+                    }
+                  </div>
+                </div>
+              </div>
+
+              <div style="margin-top:24px;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Descrição</th>
+                      <th class="text-right">Qtd</th>
+                      <th class="text-right">Preço Unit.</th>
+                      <th class="text-right">Subtotal</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${linhasProdutos}
+                  </tbody>
+                </table>
+              </div>
+
+              <div style="margin-top:24px;" class="totals">
+                <div class="box">
+                  <div class="total-line">
+                    <span class="muted">Subtotal</span>
+                    <span>${escapeHtml(formatarMoeda(venda.subtotal || 0))}</span>
+                  </div>
+
+                  <div class="total-line">
+                    <span class="muted">IVA (${escapeHtml(taxaIvaAtual)}%)</span>
+                    <span>${escapeHtml(formatarMoeda(venda.iva || 0))}</span>
+                  </div>
+
+                  <div class="total-line">
+                    <span class="muted">Desconto</span>
+                    <span>- ${escapeHtml(formatarMoeda(venda.desconto || 0))}</span>
+                  </div>
+
+                  <div class="grand-total">
+                    <span>Total</span>
+                    <span>${escapeHtml(formatarMoeda(venda.total || 0))}</span>
+                  </div>
+
+                  ${
+                    venda.metodoPagamento === "dinheiro"
+                      ? `
+                        <div class="total-line" style="margin-top:8px;">
+                          <span class="muted">Valor recebido</span>
+                          <span>${escapeHtml(formatarMoeda(venda.valorRecebido || 0))}</span>
+                        </div>
+                        <div class="total-line">
+                          <span class="muted">Troco</span>
+                          <span style="font-weight:700;color:#166534;">${escapeHtml(formatarMoeda(venda.troco || 0))}</span>
+                        </div>
+                      `
+                      : ""
+                  }
+                </div>
+              </div>
+
+              ${
+                venda.motivoCancelamento
+                  ? `
+                    <div class="cancel-box">
+                      <strong>Motivo do cancelamento:</strong> ${escapeHtml(venda.motivoCancelamento)}
+                    </div>
+                  `
+                  : ""
+              }
+
+              <div class="footer">
+                <div>Obrigado pela sua preferência.</div>
+                <div>Documento emitido eletronicamente pelo sistema ${escapeHtml(dadosEmpresa.nome)}.</div>
+                <div>Este documento serve como comprovativo da transação.</div>
+              </div>
+            </div>
+          </div>
+        </body>
+      </html>
+    `;
+  };
+
   const handleImprimirRecibo = (venda: Venda) => {
     if (isVendedor && venda.vendedorId !== vendedorUid) {
       toast({
         title: "Permissão negada",
-        description: "Você só pode imprimir recibos das suas próprias vendas.",
+        description: "Você só pode imprimir facturas das suas próprias vendas.",
         variant: "destructive",
       });
       return;
     }
 
-    setVendaSelecionada(venda);
-    setDialogAberto(true);
-    setTimeout(() => window.print(), 150);
+    const html = gerarHtmlFactura(venda);
+    const printWindow = window.open("", "_blank", "width=900,height=700");
+
+    if (!printWindow) {
+      toast({
+        title: "Erro",
+        description: "Não foi possível abrir a janela de impressão.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    printWindow.document.open();
+    printWindow.document.write(html);
+    printWindow.document.close();
+    printWindow.focus();
+
+    setTimeout(() => {
+      printWindow.print();
+    }, 400);
   };
 
   if (loading) {
@@ -503,10 +867,16 @@ const Vendas = () => {
             <CardContent>
               <div className="text-2xl font-bold">{stats.total}</div>
               <div className="mt-2 flex flex-wrap gap-2">
-                <Badge variant="outline" className="border-green-500/30 bg-green-500/10 text-green-600">
+                <Badge
+                  variant="outline"
+                  className="border-green-500/30 bg-green-500/10 text-green-600"
+                >
                   {stats.concluidas} concluídas
                 </Badge>
-                <Badge variant="outline" className="border-yellow-500/30 bg-yellow-500/10 text-yellow-600">
+                <Badge
+                  variant="outline"
+                  className="border-yellow-500/30 bg-yellow-500/10 text-yellow-600"
+                >
                   {stats.pendentes} pendentes
                 </Badge>
               </div>
@@ -530,7 +900,9 @@ const Vendas = () => {
               <TrendingUp className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-xl font-bold text-primary">{formatarMoeda(stats.ticketMedio)}</div>
+              <div className="text-xl font-bold text-primary">
+                {formatarMoeda(stats.ticketMedio)}
+              </div>
               <p className="mt-1 text-xs text-muted-foreground">Por venda concluída</p>
             </CardContent>
           </Card>
@@ -572,19 +944,74 @@ const Vendas = () => {
               </div>
 
               <div className="flex flex-wrap items-center gap-2">
-                <Badge variant={quickFilter === "todos" ? "default" : "outline"} className="cursor-pointer" onClick={() => setQuickFilter("todos")}>Todos</Badge>
-                <Badge variant={quickFilter === "concluida" ? "default" : "outline"} className="cursor-pointer" onClick={() => setQuickFilter("concluida")}><Filter className="mr-1 h-3 w-3" />Concluídas</Badge>
-                <Badge variant={quickFilter === "pendente" ? "default" : "outline"} className="cursor-pointer" onClick={() => setQuickFilter("pendente")}>Pendentes</Badge>
-                <Badge variant={quickFilter === "cancelada" ? "default" : "outline"} className="cursor-pointer" onClick={() => setQuickFilter("cancelada")}>Canceladas</Badge>
-                <Badge variant={quickFilter === "hoje" ? "default" : "outline"} className="cursor-pointer" onClick={() => setQuickFilter("hoje")}>Hoje</Badge>
+                <Badge
+                  variant={quickFilter === "todos" ? "default" : "outline"}
+                  className="cursor-pointer"
+                  onClick={() => setQuickFilter("todos")}
+                >
+                  Todos
+                </Badge>
+                <Badge
+                  variant={quickFilter === "concluida" ? "default" : "outline"}
+                  className="cursor-pointer"
+                  onClick={() => setQuickFilter("concluida")}
+                >
+                  <Filter className="mr-1 h-3 w-3" />
+                  Concluídas
+                </Badge>
+                <Badge
+                  variant={quickFilter === "pendente" ? "default" : "outline"}
+                  className="cursor-pointer"
+                  onClick={() => setQuickFilter("pendente")}
+                >
+                  Pendentes
+                </Badge>
+                <Badge
+                  variant={quickFilter === "cancelada" ? "default" : "outline"}
+                  className="cursor-pointer"
+                  onClick={() => setQuickFilter("cancelada")}
+                >
+                  Canceladas
+                </Badge>
+                <Badge
+                  variant={quickFilter === "hoje" ? "default" : "outline"}
+                  className="cursor-pointer"
+                  onClick={() => setQuickFilter("hoje")}
+                >
+                  Hoje
+                </Badge>
               </div>
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
-              <Badge variant={paymentFilter === "todos" ? "default" : "outline"} className="cursor-pointer" onClick={() => setPaymentFilter("todos")}>Pagamento: todos</Badge>
-              <Badge variant={paymentFilter === "dinheiro" ? "default" : "outline"} className="cursor-pointer" onClick={() => setPaymentFilter("dinheiro")}>Dinheiro</Badge>
-              <Badge variant={paymentFilter === "cartao" ? "default" : "outline"} className="cursor-pointer" onClick={() => setPaymentFilter("cartao")}>Cartão</Badge>
-              <Badge variant={paymentFilter === "transferencia" ? "default" : "outline"} className="cursor-pointer" onClick={() => setPaymentFilter("transferencia")}>Transferência</Badge>
+              <Badge
+                variant={paymentFilter === "todos" ? "default" : "outline"}
+                className="cursor-pointer"
+                onClick={() => setPaymentFilter("todos")}
+              >
+                Pagamento: todos
+              </Badge>
+              <Badge
+                variant={paymentFilter === "dinheiro" ? "default" : "outline"}
+                className="cursor-pointer"
+                onClick={() => setPaymentFilter("dinheiro")}
+              >
+                Dinheiro
+              </Badge>
+              <Badge
+                variant={paymentFilter === "cartao" ? "default" : "outline"}
+                className="cursor-pointer"
+                onClick={() => setPaymentFilter("cartao")}
+              >
+                Cartão
+              </Badge>
+              <Badge
+                variant={paymentFilter === "transferencia" ? "default" : "outline"}
+                className="cursor-pointer"
+                onClick={() => setPaymentFilter("transferencia")}
+              >
+                Transferência
+              </Badge>
             </div>
 
             <div className="text-sm text-muted-foreground">
@@ -623,8 +1050,13 @@ const Vendas = () => {
                 )}
 
                 {vendasPaginadas.map((venda) => (
-                  <tr key={venda.id} className="border-b transition-colors hover:bg-muted/30 last:border-0">
-                    <td className="px-4 py-3 font-mono text-xs">{venda.id ? `${venda.id.slice(0, 8)}...` : "-"}</td>
+                  <tr
+                    key={venda.id}
+                    className="border-b transition-colors hover:bg-muted/30 last:border-0"
+                  >
+                    <td className="px-4 py-3 font-mono text-xs">
+                      {venda.id ? `${venda.id.slice(0, 8)}...` : "-"}
+                    </td>
                     <td className="px-4 py-3 font-medium">{venda.clienteNome}</td>
                     <td className="px-4 py-3 text-muted-foreground">{formatarData(venda.createdAt)}</td>
                     <td className="px-4 py-3">
@@ -637,7 +1069,12 @@ const Vendas = () => {
                     <td className="px-4 py-3">{getStatusBadge(venda.status)}</td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1">
-                        <Button variant="ghost" size="sm" onClick={() => handleVerDetalhes(venda)} title="Ver detalhes">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleVerDetalhes(venda)}
+                          title="Ver detalhes"
+                        >
                           <Eye className="h-4 w-4" />
                         </Button>
 
@@ -645,7 +1082,7 @@ const Vendas = () => {
                           variant="ghost"
                           size="sm"
                           onClick={() => handleImprimirRecibo(venda)}
-                          title="Imprimir recibo"
+                          title="Imprimir factura"
                           disabled={venda.status === "cancelada"}
                         >
                           <Printer className="h-4 w-4" />
@@ -683,12 +1120,22 @@ const Vendas = () => {
               </p>
 
               <div className="flex items-center gap-2">
-                <Button variant="outline" size="sm" onClick={() => setPage((prev) => Math.max(1, prev - 1))} disabled={page === 1}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+                  disabled={page === 1}
+                >
                   <ChevronLeft className="mr-1 h-4 w-4" />
                   Anterior
                 </Button>
 
-                <Button variant="outline" size="sm" onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))} disabled={page === totalPages}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
+                  disabled={page === totalPages}
+                >
                   Próxima
                   <ChevronRight className="ml-1 h-4 w-4" />
                 </Button>
@@ -699,106 +1146,193 @@ const Vendas = () => {
       </div>
 
       <Dialog open={dialogAberto} onOpenChange={setDialogAberto}>
-        <DialogContent className="max-w-3xl">
+        <DialogContent className="max-h-[92vh] max-w-4xl overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Detalhes da Venda</DialogTitle>
+            <DialogTitle>Detalhes da Venda / Factura</DialogTitle>
             <DialogDescription>Informações completas da venda selecionada</DialogDescription>
           </DialogHeader>
 
           {vendaSelecionada && (
             <div className="space-y-6">
-              <div className="grid grid-cols-1 gap-4 rounded-lg bg-muted/30 p-4 md:grid-cols-2">
-                <div>
-                  <p className="text-sm text-muted-foreground">ID da Venda</p>
-                  <p className="font-mono text-sm">{vendaSelecionada.id}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">Data</p>
-                  <p>{formatarData(vendaSelecionada.createdAt)}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">Cliente</p>
-                  <p className="font-medium">{vendaSelecionada.clienteNome}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">Status</p>
-                  <div>{getStatusBadge(vendaSelecionada.status)}</div>
-                </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">Pagamento</p>
-                  <p>{getMetodoPagamentoLabel(vendaSelecionada.metodoPagamento)}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">Itens</p>
-                  <p>{vendaSelecionada.produtos.length}</p>
-                </div>
-              </div>
+              <div className="rounded-xl border bg-white p-6 text-black shadow-sm">
+                <div className="mb-6 flex flex-col gap-6 border-b pb-6 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="space-y-2">
+                    <div className="flex items-start gap-4">
+                      {dadosEmpresa.logo ? (
+                        <img
+                          src={dadosEmpresa.logo}
+                          alt={dadosEmpresa.nome}
+                          className="h-14 w-14 rounded-lg border object-cover"
+                        />
+                      ) : null}
 
-              <div>
-                <h3 className="mb-3 font-semibold">Produtos</h3>
-                <table className="w-full text-sm">
-                  <thead className="border-b">
-                    <tr>
-                      <th className="py-2 text-left">Produto</th>
-                      <th className="py-2 text-right">Qtd</th>
-                      <th className="py-2 text-right">Preço Unit.</th>
-                      <th className="py-2 text-right">Subtotal</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {vendaSelecionada.produtos.map((produto, index) => (
-                      <tr key={index} className="border-b last:border-0">
-                        <td className="py-2">{produto.nome}</td>
-                        <td className="py-2 text-right">{produto.quantidade}</td>
-                        <td className="py-2 text-right">{formatarMoeda(produto.precoUnitario)}</td>
-                        <td className="py-2 text-right font-medium">{formatarMoeda(produto.subtotal)}</td>
+                      <div>
+                        <h2 className="text-2xl font-bold">{dadosEmpresa.nome}</h2>
+                        <p className="text-sm text-slate-600">{dadosEmpresa.subtitulo}</p>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1 text-sm text-slate-700">
+                      <p>{dadosEmpresa.nuit}</p>
+                      <p>{dadosEmpresa.endereco}</p>
+                      <p>{dadosEmpresa.telefone}</p>
+                      <p>{dadosEmpresa.email}</p>
+                      {dadosEmpresa.website && <p>{dadosEmpresa.website}</p>}
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border bg-slate-50 p-4 sm:min-w-[260px]">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Factura
+                    </p>
+                    <div className="mt-2 space-y-1 text-sm">
+                      <p>
+                        <span className="font-medium">Número:</span>{" "}
+                        {getNumeroFactura(vendaSelecionada)}
+                      </p>
+                      <p>
+                        <span className="font-medium">ID Venda:</span> {vendaSelecionada.id}
+                      </p>
+                      <p>
+                        <span className="font-medium">Data:</span>{" "}
+                        {formatarData(vendaSelecionada.createdAt)}
+                      </p>
+                      <p>
+                        <span className="font-medium">Status:</span>{" "}
+                        {vendaSelecionada.status === "concluida"
+                          ? "Concluída"
+                          : vendaSelecionada.status === "cancelada"
+                            ? "Cancelada"
+                            : "Pendente"}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-2">
+                  <div className="rounded-lg border p-4">
+                    <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Cliente
+                    </p>
+                    <div className="space-y-1 text-sm">
+                      <p className="font-semibold">
+                        {vendaSelecionada.clienteNome || "Consumidor final"}
+                      </p>
+                      <p>
+                        <span className="text-slate-500">Código da venda:</span>{" "}
+                        {vendaSelecionada.id || "-"}
+                      </p>
+                      <p>
+                        <span className="text-slate-500">Data da venda:</span>{" "}
+                        {formatarDataCurta(vendaSelecionada.createdAt)}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border p-4">
+                    <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Pagamento
+                    </p>
+                    <div className="space-y-1 text-sm">
+                      <p>
+                        <span className="font-medium">Método:</span>{" "}
+                        {getMetodoPagamentoLabel(vendaSelecionada.metodoPagamento)}
+                      </p>
+                      <p>
+                        <span className="font-medium">Itens:</span>{" "}
+                        {vendaSelecionada.produtos.length}
+                      </p>
+                      {vendaSelecionada.vendedorNome && (
+                        <p>
+                          <span className="font-medium">Vendedor:</span>{" "}
+                          {vendaSelecionada.vendedorNome}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mb-6 overflow-hidden rounded-lg border">
+                  <table className="w-full border-collapse text-sm">
+                    <thead className="bg-slate-100">
+                      <tr>
+                        <th className="px-4 py-3 text-left font-semibold">Descrição</th>
+                        <th className="px-4 py-3 text-right font-semibold">Qtd</th>
+                        <th className="px-4 py-3 text-right font-semibold">Preço Unit.</th>
+                        <th className="px-4 py-3 text-right font-semibold">Subtotal</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              <div className="border-t pt-4">
-                <div className="space-y-2">
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Subtotal:</span>
-                    <span>{formatarMoeda(vendaSelecionada.subtotal)}</span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">IVA:</span>
-                    <span>{formatarMoeda(vendaSelecionada.iva)}</span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Desconto:</span>
-                    <span>- {formatarMoeda(vendaSelecionada.desconto)}</span>
-                  </div>
-                  <div className="flex justify-between border-t pt-2 text-lg font-bold">
-                    <span>Total:</span>
-                    <span className="text-primary">{formatarMoeda(vendaSelecionada.total)}</span>
-                  </div>
+                    </thead>
+                    <tbody>
+                      {vendaSelecionada.produtos.map((produto, index) => (
+                        <tr key={index} className="border-t">
+                          <td className="px-4 py-3">{produto.nome}</td>
+                          <td className="px-4 py-3 text-right">{produto.quantidade}</td>
+                          <td className="px-4 py-3 text-right">
+                            {formatarMoeda(produto.precoUnitario)}
+                          </td>
+                          <td className="px-4 py-3 text-right font-medium">
+                            {formatarMoeda(produto.subtotal)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
 
-                {vendaSelecionada.metodoPagamento === "dinheiro" && (
-                  <div className="mt-4 rounded-lg bg-muted/30 p-3">
-                    <p className="text-sm">
-                      <span className="text-muted-foreground">Valor Recebido:</span>{" "}
-                      <span className="font-medium">{formatarMoeda(vendaSelecionada.valorRecebido || 0)}</span>
-                    </p>
-                    <p className="text-sm">
-                      <span className="text-muted-foreground">Troco:</span>{" "}
-                      <span className="font-medium text-green-600">{formatarMoeda(vendaSelecionada.troco || 0)}</span>
-                    </p>
+                <div className="mb-6 flex justify-end">
+                  <div className="w-full max-w-md space-y-2 rounded-lg border p-4">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-slate-600">Subtotal</span>
+                      <span>{formatarMoeda(vendaSelecionada.subtotal || 0)}</span>
+                    </div>
+
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-slate-600">IVA ({taxaIvaAtual}%)</span>
+                      <span>{formatarMoeda(vendaSelecionada.iva || 0)}</span>
+                    </div>
+
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-slate-600">Desconto</span>
+                      <span>- {formatarMoeda(vendaSelecionada.desconto || 0)}</span>
+                    </div>
+
+                    <div className="flex items-center justify-between border-t pt-3 text-lg font-bold">
+                      <span>Total</span>
+                      <span>{formatarMoeda(vendaSelecionada.total || 0)}</span>
+                    </div>
+
+                    {vendaSelecionada.metodoPagamento === "dinheiro" && (
+                      <>
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="text-slate-600">Valor recebido</span>
+                          <span>{formatarMoeda(vendaSelecionada.valorRecebido || 0)}</span>
+                        </div>
+
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="text-slate-600">Troco</span>
+                          <span className="font-semibold text-green-700">
+                            {formatarMoeda(vendaSelecionada.troco || 0)}
+                          </span>
+                        </div>
+                      </>
+                    )}
                   </div>
-                )}
+                </div>
 
                 {vendaSelecionada.motivoCancelamento && (
-                  <div className="mt-4 rounded-lg bg-destructive/10 p-3">
+                  <div className="mb-6 rounded-lg border border-red-200 bg-red-50 p-4">
                     <p className="text-sm">
-                      <span className="text-muted-foreground">Motivo do cancelamento:</span>{" "}
-                      <span className="font-medium">{vendaSelecionada.motivoCancelamento}</span>
+                      <span className="font-medium text-red-700">Motivo do cancelamento:</span>{" "}
+                      <span className="text-red-800">{vendaSelecionada.motivoCancelamento}</span>
                     </p>
                   </div>
                 )}
+
+                <div className="border-t pt-4 text-center text-xs text-slate-500">
+                  <p>Obrigado pela sua preferência.</p>
+                  <p>Documento emitido eletronicamente pelo sistema {dadosEmpresa.nome}.</p>
+                  <p>Este documento serve como comprovativo da transação.</p>
+                </div>
               </div>
 
               <div className="flex justify-end gap-2">
@@ -810,7 +1344,7 @@ const Vendas = () => {
                   disabled={vendaSelecionada.status === "cancelada"}
                 >
                   <Printer className="mr-2 h-4 w-4" />
-                  Imprimir Recibo
+                  Imprimir Factura
                 </Button>
               </div>
             </div>
@@ -828,7 +1362,9 @@ const Vendas = () => {
                   <p>
                     Tem certeza que deseja cancelar esta venda?
                     <br />
-                    <span className="text-sm text-destructive">Esta ação não pode ser desfeita.</span>
+                    <span className="text-sm text-destructive">
+                      Esta ação não pode ser desfeita.
+                    </span>
                   </p>
 
                   <div className="space-y-2">

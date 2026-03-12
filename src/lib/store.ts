@@ -462,6 +462,7 @@ export interface Venda {
   valorRecebido?: number | null;
   troco?: number | null;
   vendedorId?: string | null;
+  vendedorNome?: string | null;
   motivoCancelamento?: string;
   createdAt?: FirestoreDate;
   updatedAt?: FirestoreDate;

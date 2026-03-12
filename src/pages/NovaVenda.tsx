@@ -23,6 +23,7 @@ import {
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/components/ui/use-toast";
 import { usePlanAccess } from "@/hooks/usePlanAccess";
+import { useSystemConfig } from "@/contexts/SystemConfigContext";
 import {
   Loader2,
   AlertCircle,
@@ -47,10 +48,46 @@ interface NovoCliente {
   email: string;
 }
 
+const sanitizeNumericInput = (value: string, allowDecimal = true) => {
+  let cleaned = value.replace(",", ".");
+
+  cleaned = allowDecimal
+    ? cleaned.replace(/[^\d.]/g, "")
+    : cleaned.replace(/\D/g, "");
+
+  if (allowDecimal) {
+    const firstDot = cleaned.indexOf(".");
+    if (firstDot !== -1) {
+      cleaned =
+        cleaned.slice(0, firstDot + 1) +
+        cleaned.slice(firstDot + 1).replace(/\./g, "");
+    }
+  }
+
+  if (cleaned.startsWith(".")) {
+    cleaned = `0${cleaned}`;
+  }
+
+  if (cleaned.includes(".")) {
+    const [intPart, decPart] = cleaned.split(".");
+    const normalizedInt = intPart.replace(/^0+(?=\d)/, "") || "0";
+    return `${normalizedInt}.${decPart ?? ""}`;
+  }
+
+  return cleaned.replace(/^0+(?=\d)/, "");
+};
+
+const parseInputNumber = (value: string) => {
+  if (!value || value === ".") return 0;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
 const NovaVenda = () => {
   const { toast } = useToast();
   const { userData, firebaseUser, isVendedor, isAdmin } = useAuth();
   const { blocked, canCreateSales, currentPlan, currentStatus, daysLeft } = usePlanAccess();
+  const { ivaConfig, sistemaConfig } = useSystemConfig();
 
   const [clientes, setClientes] = useState<Cliente[]>([]);
   const [clienteSelecionado, setClienteSelecionado] = useState<Cliente | null>(null);
@@ -67,20 +104,26 @@ const NovaVenda = () => {
   const [produtosSelecionados, setProdutosSelecionados] = useState<VendaProduto[]>([]);
   const [produtoSelecionadoId, setProdutoSelecionadoId] = useState<string>("");
 
-  const [metodoPagamento, setMetodoPagamento] = useState<"dinheiro" | "cartao" | "transferencia">("dinheiro");
-  const [valorRecebido, setValorRecebido] = useState<number>(0);
+  const [metodoPagamento, setMetodoPagamento] =
+    useState<"dinheiro" | "cartao" | "transferencia">("dinheiro");
 
+  const [valorRecebidoInput, setValorRecebidoInput] = useState("");
   const [tipoIVA, setTipoIVA] = useState<"percentual" | "valor">("percentual");
-  const [ivaValor, setIvaValor] = useState<number>(17);
-
+  const [ivaValorInput, setIvaValorInput] = useState(String(ivaConfig?.taxaPadrao ?? 17));
   const [tipoDesconto, setTipoDesconto] = useState<"percentual" | "valor">("percentual");
-  const [descontoValor, setDescontoValor] = useState<number>(0);
+  const [descontoValorInput, setDescontoValorInput] = useState("");
 
   const [isFinalizando, setIsFinalizando] = useState(false);
   const [isCreatingClient, setIsCreatingClient] = useState(false);
 
   const vendedorUid = firebaseUser?.uid ?? null;
   const limiteDesconto = isVendedor ? userData?.limite_desconto || 10 : 100;
+
+  useEffect(() => {
+    if (typeof ivaConfig?.taxaPadrao === "number") {
+      setIvaValorInput(String(ivaConfig.taxaPadrao));
+    }
+  }, [ivaConfig?.taxaPadrao]);
 
   useEffect(() => {
     if (blocked) {
@@ -145,10 +188,14 @@ const NovaVenda = () => {
     Number(valor || 0).toLocaleString("pt-MZ", {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
-    }) + " MZN";
+    }) + ` ${sistemaConfig?.moeda || "MZN"}`;
 
   const normalizarTelefone = (telefone: string) =>
     telefone.replace(/\s+/g, " ").trim();
+
+  const valorRecebido = parseInputNumber(valorRecebidoInput);
+  const ivaValor = parseInputNumber(ivaValorInput);
+  const descontoValor = parseInputNumber(descontoValorInput);
 
   const clientesFiltrados = useMemo(() => {
     const term = clienteSearch.trim().toLowerCase();
@@ -272,6 +319,17 @@ const NovaVenda = () => {
         };
       })
     );
+  };
+
+  const handleQuantidadeInput = (id: string, value: string) => {
+    const cleaned = sanitizeNumericInput(value, false);
+
+    if (!cleaned) return;
+
+    const qtd = Number(cleaned);
+    if (!Number.isFinite(qtd) || qtd < 1) return;
+
+    atualizarQuantidade(id, qtd);
   };
 
   const incrementarQuantidade = (id: string) => {
@@ -512,10 +570,10 @@ const NovaVenda = () => {
     setClienteSearch("");
     setTipoCliente("existente");
     setNovoCliente({ nome: "", telefone: "", email: "" });
-    setValorRecebido(0);
-    setDescontoValor(0);
+    setValorRecebidoInput("");
+    setDescontoValorInput("");
     setTipoDesconto("percentual");
-    setIvaValor(17);
+    setIvaValorInput(String(ivaConfig?.taxaPadrao ?? 17));
     setTipoIVA("percentual");
     setMetodoPagamento("dinheiro");
   };
@@ -547,7 +605,12 @@ const NovaVenda = () => {
         status: "concluida",
         valorRecebido: metodoPagamento === "dinheiro" ? valorRecebido : null,
         troco: metodoPagamento === "dinheiro" ? Math.max(0, troco) : null,
-        vendedorId: isVendedor ? vendedorUid! : null,
+        vendedorId: vendedorUid || null,
+        vendedorNome:
+          userData?.nome ||
+          firebaseUser?.displayName ||
+          firebaseUser?.email ||
+          "Utilizador",
       };
 
       await createVenda(vendaData);
@@ -855,12 +918,11 @@ const NovaVenda = () => {
                         -
                       </Button>
                       <Input
-                        type="number"
-                        value={p.quantidade}
-                        min={1}
-                        max={p.produto.stock}
+                        type="text"
+                        inputMode="numeric"
+                        value={String(p.quantidade)}
                         onChange={(e) =>
-                          atualizarQuantidade(p.produto.id ?? "", Number(e.target.value))
+                          handleQuantidadeInput(p.produto.id ?? "", e.target.value)
                         }
                         className="w-20"
                         disabled={blocked}
@@ -927,18 +989,20 @@ const NovaVenda = () => {
               {metodoPagamento === "dinheiro" && (
                 <div className="space-y-3 rounded-lg border p-4">
                   <div className="space-y-2">
-                    <Label>Valor Recebido (MZN)</Label>
+                    <Label>Valor Recebido ({sistemaConfig?.moeda || "MZN"})</Label>
                     <Input
-                      type="number"
-                      value={valorRecebido}
-                      onChange={(e) => setValorRecebido(Number(e.target.value))}
-                      min={0}
-                      step="0.01"
+                      type="text"
+                      inputMode="decimal"
+                      value={valorRecebidoInput}
+                      onChange={(e) =>
+                        setValorRecebidoInput(sanitizeNumericInput(e.target.value, true))
+                      }
+                      placeholder="Digite o valor recebido"
                       disabled={blocked}
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label>Troco (MZN)</Label>
+                    <Label>Troco ({sistemaConfig?.moeda || "MZN"})</Label>
                     <Input
                       value={troco.toFixed(2)}
                       readOnly
@@ -978,35 +1042,35 @@ const NovaVenda = () => {
 
               <div className="space-y-2">
                 <Label>
-                  {tipoIVA === "percentual" ? "Percentual de IVA (%)" : "Valor do IVA (MZN)"}
+                  {tipoIVA === "percentual" ? "Percentual de IVA (%)" : `Valor do IVA (${sistemaConfig?.moeda || "MZN"})`}
                 </Label>
                 <Input
-                  type="number"
-                  value={ivaValor}
-                  onChange={(e) => setIvaValor(Math.max(0, Number(e.target.value)))}
-                  min={0}
-                  step={tipoIVA === "percentual" ? "0.1" : "0.01"}
+                  type="text"
+                  inputMode="decimal"
+                  value={ivaValorInput}
+                  onChange={(e) => setIvaValorInput(sanitizeNumericInput(e.target.value, true))}
+                  placeholder={tipoIVA === "percentual" ? "Ex: 17" : "Ex: 150"}
                   disabled={blocked}
                 />
               </div>
 
               <div className="flex flex-wrap gap-2">
-                {[0, 5, 17].map((valor) => (
-                  <Button
-                    key={valor}
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      setTipoIVA("percentual");
-                      setIvaValor(valor);
-                    }}
-                    disabled={blocked}
-                  >
-                    {valor}%
-                  </Button>
-                ))}
-              </div>
+  {[0, 5, ivaConfig?.taxaPadrao ?? 17].map((valor) => (
+    <Button
+      key={valor}
+      type="button"
+      variant="outline"
+      size="sm"
+      onClick={() => {
+        setTipoIVA("percentual");
+        setIvaValorInput(String(valor));
+      }}
+      disabled={blocked}
+    >
+      {valor}%
+    </Button>
+  ))}
+</div>
 
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">IVA Calculado:</span>
@@ -1047,13 +1111,15 @@ const NovaVenda = () => {
                 <Label>
                   {tipoDesconto === "percentual"
                     ? "Percentual de Desconto (%)"
-                    : "Valor do Desconto (MZN)"}
+                    : `Valor do Desconto (${sistemaConfig?.moeda || "MZN"})`}
                 </Label>
                 <Input
-                  type="number"
-                  value={descontoValor}
+                  type="text"
+                  inputMode="decimal"
+                  value={descontoValorInput}
                   onChange={(e) => {
-                    const novoValor = Math.max(0, Number(e.target.value));
+                    const cleaned = sanitizeNumericInput(e.target.value, true);
+                    const novoValor = parseInputNumber(cleaned);
 
                     if (isVendedor && tipoDesconto === "percentual" && novoValor > limiteDesconto) {
                       toast({
@@ -1064,11 +1130,9 @@ const NovaVenda = () => {
                       return;
                     }
 
-                    setDescontoValor(novoValor);
+                    setDescontoValorInput(cleaned);
                   }}
-                  min={0}
-                  max={tipoDesconto === "percentual" ? (isVendedor ? limiteDesconto : 100) : subtotal}
-                  step={tipoDesconto === "percentual" ? "0.1" : "0.01"}
+                  placeholder={tipoDesconto === "percentual" ? "Ex: 5" : "Ex: 100"}
                   disabled={blocked}
                 />
               </div>
@@ -1083,7 +1147,7 @@ const NovaVenda = () => {
                     onClick={() => {
                       setTipoDesconto("percentual");
                       if (isVendedor && valor > limiteDesconto) return;
-                      setDescontoValor(valor);
+                      setDescontoValorInput(String(valor));
                     }}
                     disabled={blocked}
                   >
@@ -1103,13 +1167,13 @@ const NovaVenda = () => {
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">
-                  IVA ({tipoIVA === "percentual" ? ivaValor + "%" : "fixo"}):
+                  IVA ({tipoIVA === "percentual" ? `${ivaValor}%` : "fixo"}):
                 </span>
                 <span className="text-card-foreground">{formatarMoeda(ivaTotal)}</span>
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">
-                  Desconto ({tipoDesconto === "percentual" ? descontoValor + "%" : "fixo"}):
+                  Desconto ({tipoDesconto === "percentual" ? `${descontoValor}%` : "fixo"}):
                 </span>
                 <span className="text-card-foreground">- {formatarMoeda(descontoTotal)}</span>
               </div>

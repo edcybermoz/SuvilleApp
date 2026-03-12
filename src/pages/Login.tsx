@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useAuth } from "@/contexts/AuthContext";
-import { useNavigate, useLocation } from "react-router-dom";
+import { useNavigate, useLocation, Link } from "react-router-dom";
 import {
   ShoppingBag,
   Loader2,
@@ -10,6 +10,9 @@ import {
   Lock,
   AlertCircle,
   KeyRound,
+  ArrowLeft,
+  Chrome,
+  Apple,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -34,7 +37,15 @@ type LocationState = {
 };
 
 const Login = () => {
-  const { login, loading, profileLoading, isAuthenticated } = useAuth();
+  const {
+    login,
+    loginWithGoogle,
+    loginWithApple,
+    loading,
+    profileLoading,
+    isAuthenticated,
+  } = useAuth();
+
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -45,9 +56,15 @@ const Login = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
 
-  const from = useMemo(() => {
+  const destino = useMemo(() => {
     const state = location.state as LocationState | null;
-    return state?.from?.pathname || "/";
+    const fromPath = state?.from?.pathname;
+
+    if (!fromPath || fromPath === "/" || fromPath === "/login") {
+      return "/dashboard";
+    }
+
+    return fromPath;
   }, [location.state]);
 
   useEffect(() => {
@@ -60,9 +77,9 @@ const Login = () => {
 
   useEffect(() => {
     if (!loading && !profileLoading && isAuthenticated) {
-      navigate(from, { replace: true });
+      navigate(destino, { replace: true });
     }
-  }, [loading, profileLoading, isAuthenticated, navigate, from]);
+  }, [loading, profileLoading, isAuthenticated, navigate, destino]);
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -93,7 +110,7 @@ const Login = () => {
         localStorage.removeItem("rememberedEmail");
       }
 
-      navigate(from, { replace: true });
+      navigate(destino, { replace: true });
     } catch (err: any) {
       setError(err?.message || "Erro ao fazer login. Tente novamente.");
     } finally {
@@ -101,10 +118,40 @@ const Login = () => {
     }
   };
 
+  const handleGoogleLogin = async () => {
+    if (isBusy) return;
+
+    setError(null);
+    setSubmitting(true);
+
+    try {
+      await loginWithGoogle();
+      navigate(destino, { replace: true });
+    } catch (err: any) {
+      setError(err?.message || "Erro ao entrar com Google.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleAppleLogin = async () => {
+    if (isBusy) return;
+
+    setError(null);
+    setSubmitting(true);
+
+    try {
+      await loginWithApple();
+      navigate(destino, { replace: true });
+    } catch (err: any) {
+      setError(err?.message || "Erro ao entrar com Apple ID.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   const handleForgotPassword = () => {
-    setError(
-      "Para recuperar a senha, contacte o suporte ou o administrador do sistema."
-    );
+    setError("Para recuperar a senha, contacte o suporte ou o administrador do sistema.");
   };
 
   const isBusy = submitting || loading || profileLoading;
@@ -112,131 +159,182 @@ const Login = () => {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-background to-muted p-4">
-      <Card className="w-full max-w-md shadow-xl">
-        <CardHeader className="space-y-1 text-center">
-          <div className="mb-2 flex justify-center">
-            <div className="rounded-full bg-primary/10 p-3">
-              <ShoppingBag className="h-8 w-8 text-primary" />
-            </div>
-          </div>
+      <div className="w-full max-w-md">
+        <div className="mb-4">
+          <Link
+            to="/"
+            className="inline-flex items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Voltar à homepage
+          </Link>
+        </div>
 
-          <CardTitle className="text-2xl font-bold text-foreground">VILLESys</CardTitle>
-          <CardDescription className="text-muted-foreground">
-            Sistema de Gestão de Vendas
-          </CardDescription>
-        </CardHeader>
-
-        <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4" noValidate>
-            <div className="space-y-2">
-              <Label htmlFor="email" className="text-foreground">
-                Email
-              </Label>
-
-              <div className="relative">
-                <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  id="email"
-                  type="email"
-                  placeholder="seu@email.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  disabled={isBusy}
-                  className="border-input bg-background pl-9 text-foreground focus:ring-primary"
-                  autoComplete="email"
-                  autoFocus
-                  aria-invalid={!!error}
-                  aria-describedby={error ? "login-error" : undefined}
-                />
+        <Card className="w-full shadow-xl">
+          <CardHeader className="space-y-1 text-center">
+            <div className="mb-2 flex justify-center">
+              <div className="rounded-full bg-primary/10 p-3">
+                <ShoppingBag className="h-8 w-8 text-primary" />
               </div>
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="password" className="text-foreground">
-                Senha
-              </Label>
+            <CardTitle className="text-2xl font-bold text-foreground">VILLESys</CardTitle>
+            <CardDescription className="text-muted-foreground">
+              Entre para aceder ao sistema de gestão
+            </CardDescription>
+          </CardHeader>
 
-              <div className="relative">
-                <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  id="password"
-                  type={showPassword ? "text" : "password"}
-                  placeholder="••••••••"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  disabled={isBusy}
-                  className="border-input bg-background pl-9 pr-9 text-foreground focus:ring-primary"
-                  autoComplete="current-password"
-                  aria-invalid={!!error}
-                  aria-describedby={error ? "login-error" : undefined}
-                />
+          <CardContent>
+            <div className="mb-5 space-y-3">
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full"
+                onClick={handleGoogleLogin}
+                disabled={isBusy}
+              >
+                <Chrome className="mr-2 h-4 w-4" />
+                Entrar com Google
+              </Button>
+
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full"
+                onClick={handleAppleLogin}
+                disabled={isBusy}
+              >
+                <Apple className="mr-2 h-4 w-4" />
+                Entrar com Apple ID
+              </Button>
+
+              <div className="relative py-1">
+                <div className="absolute inset-0 flex items-center">
+                  <span className="w-full border-t border-border" />
+                </div>
+                <div className="relative flex justify-center text-xs uppercase">
+                  <span className="bg-card px-2 text-muted-foreground">
+                    ou continue com email
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+              <div className="space-y-2">
+                <Label htmlFor="email" className="text-foreground">
+                  Email
+                </Label>
+
+                <div className="relative">
+                  <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    id="email"
+                    type="email"
+                    placeholder="seu@email.com"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    disabled={isBusy}
+                    className="border-input bg-background pl-9 text-foreground focus:ring-primary"
+                    autoComplete="email"
+                    autoFocus
+                    aria-invalid={!!error}
+                    aria-describedby={error ? "login-error" : undefined}
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="password" className="text-foreground">
+                  Senha
+                </Label>
+
+                <div className="relative">
+                  <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    id="password"
+                    type={showPassword ? "text" : "password"}
+                    placeholder="••••••••"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    disabled={isBusy}
+                    className="border-input bg-background pl-9 pr-9 text-foreground focus:ring-primary"
+                    autoComplete="current-password"
+                    aria-invalid={!!error}
+                    aria-describedby={error ? "login-error" : undefined}
+                  />
+
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((prev) => !prev)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground transition-colors hover:text-foreground"
+                    aria-label={showPassword ? "Ocultar senha" : "Mostrar senha"}
+                    disabled={isBusy}
+                  >
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <label className="flex cursor-pointer items-center space-x-2">
+                  <input
+                    type="checkbox"
+                    checked={rememberMe}
+                    onChange={(e) => setRememberMe(e.target.checked)}
+                    className="h-4 w-4 rounded border-input text-primary focus:ring-primary"
+                    disabled={isBusy}
+                  />
+                  <span className="text-sm text-muted-foreground">Lembrar-me</span>
+                </label>
 
                 <button
                   type="button"
-                  onClick={() => setShowPassword((prev) => !prev)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground transition-colors hover:text-foreground"
-                  aria-label={showPassword ? "Ocultar senha" : "Mostrar senha"}
+                  onClick={handleForgotPassword}
+                  className="inline-flex items-center gap-1 text-sm text-primary transition-colors hover:text-primary/80"
                   disabled={isBusy}
                 >
-                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  <KeyRound className="h-4 w-4" />
+                  Esqueceu a senha?
                 </button>
               </div>
-            </div>
 
-            <div className="flex items-center justify-between">
-              <label className="flex cursor-pointer items-center space-x-2">
-                <input
-                  type="checkbox"
-                  checked={rememberMe}
-                  onChange={(e) => setRememberMe(e.target.checked)}
-                  className="h-4 w-4 rounded border-input text-primary focus:ring-primary"
-                  disabled={isBusy}
-                />
-                <span className="text-sm text-muted-foreground">Lembrar-me</span>
-              </label>
-
-              <button
-                type="button"
-                onClick={handleForgotPassword}
-                className="inline-flex items-center gap-1 text-sm text-primary transition-colors hover:text-primary/80"
-                disabled={isBusy}
-              >
-                <KeyRound className="h-4 w-4" />
-                Esqueceu a senha?
-              </button>
-            </div>
-
-            {error && (
-              <Alert id="login-error" variant="destructive" className="border-destructive bg-destructive/10">
-                <AlertCircle className="h-4 w-4" />
-                <AlertDescription className="text-destructive">{error}</AlertDescription>
-              </Alert>
-            )}
-
-            <Button
-              type="submit"
-              className="w-full bg-primary text-primary-foreground hover:bg-primary/90"
-              disabled={isBusy}
-              size="lg"
-            >
-              {isBusy ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Entrando...
-                </>
-              ) : (
-                "Entrar"
+              {error && (
+                <Alert
+                  id="login-error"
+                  variant="destructive"
+                  className="border-destructive bg-destructive/10"
+                >
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertDescription className="text-destructive">{error}</AlertDescription>
+                </Alert>
               )}
-            </Button>
-          </form>
-        </CardContent>
 
-        <CardFooter className="flex flex-col space-y-2 border-t border-border pt-4">
-          <p className="text-center text-xs text-muted-foreground">
-            © {anoAtual} VILLESys. Todos os direitos reservados.
-          </p>
-        </CardFooter>
-      </Card>
+              <Button
+                type="submit"
+                className="w-full bg-primary text-primary-foreground hover:bg-primary/90"
+                disabled={isBusy}
+                size="lg"
+              >
+                {isBusy ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Entrando...
+                  </>
+                ) : (
+                  "Entrar"
+                )}
+              </Button>
+            </form>
+          </CardContent>
+
+          <CardFooter className="flex flex-col space-y-2 border-t border-border pt-4">
+            <p className="text-center text-xs text-muted-foreground">
+              © {anoAtual} VILLESys. Todos os direitos reservados.
+            </p>
+          </CardFooter>
+        </Card>
+      </div>
     </div>
   );
 };

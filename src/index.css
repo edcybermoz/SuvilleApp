@@ -41,7 +41,7 @@
     --input: 214.3 31.8% 91.4%;
     --ring: 222.2 84% 4.9%;
 
-    --radius: 0.5rem;
+    --radius: 0.75rem;
 
     --sidebar-bg: 222 47% 11%;
     --sidebar-fg: 210 40% 98%;
@@ -54,10 +54,10 @@
     --background: 222.2 84% 4.9%;
     --foreground: 210 40% 98%;
 
-    --card: 222.2 84% 4.9%;
+    --card: 222.2 84% 6%;
     --card-foreground: 210 40% 98%;
 
-    --popover: 222.2 84% 4.9%;
+    --popover: 222.2 84% 6%;
     --popover-foreground: 210 40% 98%;
 
     --primary: 210 40% 98%;
@@ -75,7 +75,7 @@
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 210 40% 98%;
 
-    --success: 142 76% 36%;
+    --success: 142 70% 35%;
     --success-foreground: 210 40% 98%;
 
     --warning: 38 92% 50%;
@@ -100,21 +100,34 @@
     box-sizing: border-box;
   }
 
-  html,
-  body,
-  #root {
+  html {
     width: 100%;
     min-width: 0;
     min-height: 100%;
-    margin: 0;
-    padding: 0;
+    scroll-behavior: smooth;
   }
 
   body {
+    width: 100%;
+    min-width: 0;
+    min-height: 100vh;
+    margin: 0;
+    padding: 0;
     @apply bg-background text-foreground;
     font-feature-settings: "rlig" 1, "calt" 1;
     text-align: left;
     overflow-x: hidden;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  #root {
+    width: 100%;
+    min-width: 0;
+    min-height: 100vh;
+    margin: 0;
+    padding: 0;
+    text-align: left;
   }
 
   button,
@@ -122,28 +135,46 @@
   select,
   textarea {
     min-width: 0;
+    font: inherit;
+  }
+
+  button {
+    cursor: pointer;
+  }
+
+  img,
+  svg,
+  video,
+  canvas {
+    display: block;
+    max-width: 100%;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
   }
 }
 
 @layer components {
   .badge-success {
-    @apply bg-success/20 text-success border border-success/30;
+    @apply border border-success/30 bg-success/20 text-success;
   }
 
   .badge-warning {
-    @apply bg-warning/20 text-warning border border-warning/30;
+    @apply border border-warning/30 bg-warning/20 text-warning;
   }
 
   .badge-destructive {
-    @apply bg-destructive/20 text-destructive border border-destructive/30;
+    @apply border border-destructive/30 bg-destructive/20 text-destructive;
   }
 
   .badge-info {
-    @apply bg-info/20 text-info border border-info/30;
+    @apply border border-info/30 bg-info/20 text-info;
   }
 
   .badge-accent {
-    @apply bg-accent/20 text-accent border border-accent/30;
+    @apply border border-accent/30 bg-accent/20 text-accent;
   }
 
   .card-primary {
@@ -166,6 +197,86 @@
     @apply border-t-4 border-t-accent;
   }
 
+  .app-shell {
+    @apply min-h-screen bg-background text-foreground;
+  }
+
+  .app-page {
+    @apply w-full min-w-0 px-4 py-4 md:px-6 md:py-6;
+  }
+
+  .app-section {
+    @apply rounded-lg border bg-card text-card-foreground shadow-soft;
+  }
+
+  .app-section-header {
+    @apply flex flex-col gap-2 border-b px-4 py-4 md:flex-row md:items-center md:justify-between md:px-6;
+  }
+
+  .app-section-content {
+    @apply px-4 py-4 md:px-6 md:py-6;
+  }
+
+  .form-grid {
+    @apply grid grid-cols-1 gap-4 md:grid-cols-2;
+  }
+
+  .stats-grid {
+    @apply grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4;
+  }
+
+  .table-container {
+    @apply w-full overflow-x-auto rounded-lg border;
+  }
+
+  .sidebar-surface {
+    @apply border-r bg-sidebar-bg text-sidebar-fg;
+    border-color: hsl(var(--sidebar-border));
+  }
+
+  .sidebar-item {
+    @apply flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors;
+  }
+
+  .sidebar-item:hover {
+    background: hsl(var(--sidebar-hover));
+  }
+
+  .sidebar-item-active {
+    @apply flex items-center gap-3 rounded-lg px-3 py-2 text-sm;
+    background: hsl(var(--sidebar-active));
+    color: hsl(var(--sidebar-fg));
+  }
+
+  .dropdown-content-pro {
+    @apply rounded-lg border bg-popover text-popover-foreground shadow-dropdown animate-in fade-in-0 zoom-in-95;
+  }
+
+  .input-clean {
+    @apply w-full rounded-md border bg-background px-3 py-2 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2;
+  }
+}
+
+@layer utilities {
+  .safe-mobile-container {
+    width: 100%;
+    min-width: 0;
+    overflow-x: hidden;
+  }
+
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+
   .custom-scrollbar {
     scrollbar-width: thin;
     scrollbar-color: hsl(var(--muted-foreground)) hsl(var(--muted));
@@ -178,32 +289,15 @@
 
   .custom-scrollbar::-webkit-scrollbar-track {
     background: hsl(var(--muted));
-    border-radius: 3px;
+    border-radius: 9999px;
   }
 
   .custom-scrollbar::-webkit-scrollbar-thumb {
     background: hsl(var(--muted-foreground));
-    border-radius: 3px;
+    border-radius: 9999px;
   }
 
   .custom-scrollbar::-webkit-scrollbar-thumb:hover {
     background: hsl(var(--foreground));
-  }
-
-  .scrollbar-hide {
-    -ms-overflow-style: none;
-    scrollbar-width: none;
-  }
-
-  .scrollbar-hide::-webkit-scrollbar {
-    display: none;
-  }
-}
-
-@layer utilities {
-  .safe-mobile-container {
-    width: 100%;
-    min-width: 0;
-    overflow-x: hidden;
   }
 }

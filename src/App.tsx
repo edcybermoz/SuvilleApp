@@ -8,6 +8,7 @@ import { LanguageProvider } from "./contexts/LanguageContext";
 import { SystemConfigProvider } from "./contexts/SystemConfigContext";
 import ProtectedRoute from "./components/ProtectedRoute";
 import AppLayout from "./components/AppLayout";
+import HomePage from "./pages/HomePage";
 import Dashboard from "./pages/Dashboard";
 import Vendas from "./pages/Vendas";
 import NovaVenda from "./pages/NovaVenda";
@@ -40,8 +41,11 @@ const App = () => (
               }}
             >
               <Routes>
+                {/* páginas públicas */}
+                <Route path="/" element={<HomePage />} />
                 <Route path="/login" element={<Login />} />
 
+                {/* páginas internas protegidas */}
                 <Route
                   element={
                     <ProtectedRoute>
@@ -50,7 +54,7 @@ const App = () => (
                   }
                 >
                   <Route
-                    path="/"
+                    path="/dashboard"
                     element={
                       <ProtectedRoute requireSystemAccess>
                         <Dashboard />
